@@ -108,13 +108,22 @@ export default function App() {
   const [players, setPlayers] = useState(DEFAULT_PLAYERS);
   const [editingIdx, setEditingIdx] = useState(null);
   const [editVal, setEditVal] = useState("");
-  const [result, setResult] = useState(null);
+  // undefined = never run, null = run failed, object = solved.
+  // Keeping the three states distinct lets us show a real "no solution"
+  // message instead of the empty placeholder when the solver gives up.
+  const [result, setResult] = useState(undefined);
   const [running, setRunning] = useState(false);
+  const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("schedule");
 
   const run = useCallback(() => {
+    if (new Set(players).size !== players.length) {
+      setError("Player names must be unique.");
+      return;
+    }
+    setError(null);
     setRunning(true);
-    setResult(null);
+    setResult(undefined);
     setTimeout(() => {
       const res = generateSchedule(players);
       setResult(res);
@@ -199,15 +208,22 @@ export default function App() {
           {running ? "⏳ Generating..." : "🎯 Generate Schedule"}
         </button>
 
+        {/* Inline error — shown for client-side validation (e.g. duplicate names) */}
+        {error && !running && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 text-center text-red-700 font-semibold">
+            {error}
+          </div>
+        )}
+
         {/* Results */}
-        {result === null && !running && (
+        {result === undefined && !running && (
           <div className="text-center text-gray-400 py-12">
             <p className="text-5xl mb-3">🏓</p>
             <p className="text-lg">Hit Generate to create your schedule!</p>
           </div>
         )}
 
-        {result === false && (
+        {result === null && !running && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-700 font-semibold">
             ✗ Too hard - no solution found after 500,000 iterations
           </div>
