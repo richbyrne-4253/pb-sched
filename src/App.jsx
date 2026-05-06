@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 
 const DEFAULT_PLAYERS = ["Rich", "Carol", "Steve", "Dale", "Dylan", "Tom"];
 
@@ -11,7 +11,8 @@ function shuffle(arr) {
   return a;
 }
 
-function findValidTeams(playing, partnerMap) {
+function findValidTeams(playing, partnerMap, opts) {
+  const { coed, genders } = opts;
   const combos = [];
   for (let i = 0; i < playing.length - 1; i++)
     for (let j = i + 1; j < playing.length; j++)
@@ -19,6 +20,10 @@ function findValidTeams(playing, partnerMap) {
   const shuffled = shuffle(combos);
   for (const team1 of shuffled) {
     const team2 = playing.filter(p => !team1.includes(p));
+    if (coed) {
+      if (genders[team1[0]] === genders[team1[1]]) continue;
+      if (genders[team2[0]] === genders[team2[1]]) continue;
+    }
     if ((partnerMap[team1[0]][team1[1]] || 0) >= 2) continue;
     if ((partnerMap[team2[0]][team2[1]] || 0) >= 2) continue;
     return [team1, team2];
@@ -26,7 +31,8 @@ function findValidTeams(playing, partnerMap) {
   return null;
 }
 
-function generateSchedule(players) {
+function generateSchedule(players, opts = {}) {
+  const { fixedPairs = [], coed = false, genders = {} } = opts;
   const MAX = 500000;
   for (let iter = 1; iter <= MAX; iter++) {
     const schedule = [];
@@ -50,9 +56,18 @@ function generateSchedule(players) {
       const canSit = players.filter(p => !mustPlay.has(p) && sitCounts[p] < 3);
       if (mustPlay.size > 4 || canSit.length < 2) { valid = false; break; }
 
-      const sitters = shuffle(canSit).slice(0, 2);
+      let sitters;
+      if (coed) {
+        // Coed needs 2M+2F on court → sitters must be 1M+1F.
+        const canSitM = canSit.filter(p => genders[p] === "M");
+        const canSitF = canSit.filter(p => genders[p] === "F");
+        if (!canSitM.length || !canSitF.length) { valid = false; break; }
+        sitters = [shuffle(canSitM)[0], shuffle(canSitF)[0]];
+      } else {
+        sitters = shuffle(canSit).slice(0, 2);
+      }
       const playing = players.filter(p => !sitters.includes(p));
-      const teams = findValidTeams(playing, partnerMap);
+      const teams = findValidTeams(playing, partnerMap, { coed, genders });
       if (!teams) { valid = false; break; }
 
       const [team1, team2] = teams;
@@ -68,7 +83,6 @@ function generateSchedule(players) {
 
     if (!valid) continue;
 
-    // Final audit
     let passed = true;
     for (const p of players) {
       if (gameCounts[p] !== 6) { passed = false; break; }
@@ -77,18 +91,28 @@ function generateSchedule(players) {
       const unique = Object.keys(pm).length;
       const twos = Object.values(pm).filter(v => v === 2).length;
       const ones = Object.values(pm).filter(v => v === 1).length;
-      if (total !== 6 || unique !== 5 || twos !== 1 || ones !== 4) { passed = false; break; }
+      // Coed: only 3 opposite-gender partners exist, each played twice.
+      // Open: 5 unique partners + 1 repeat — the original distribution.
+      const ok = coed
+        ? (total === 6 && unique === 3 && twos === 3 && ones === 0)
+        : (total === 6 && unique === 5 && twos === 1 && ones === 4);
+      if (!ok) { passed = false; break; }
     }
     if (!passed) continue;
 
-    // Column check
+    const expectedTwos = coed ? 3 : 1;
     for (const p of players) {
       const twosInCol = players.filter(o => o !== p && (partnerMap[o][p] || 0) === 2).length;
-      if (twosInCol !== 1) { passed = false; break; }
+      if (twosInCol !== expectedTwos) { passed = false; break; }
     }
     if (!passed) continue;
 
-    return { schedule, partnerMap, gameCounts, iterations: iter };
+    for (const [a, b] of fixedPairs) {
+      if ((partnerMap[a][b] || 0) !== 2) { passed = false; break; }
+    }
+    if (!passed) continue;
+
+    return { schedule, partnerMap, gameCounts, iterations: iter, coed };
   }
   return null;
 }
@@ -104,43 +128,114 @@ function buildPlayerGames(schedule) {
   return pg;
 }
 
+const EMPTY_PAIRS = [
+  { a: "", b: "" },
+  { a: "", b: "" },
+  { a: "", b: "" },
+];
+
 export default function App() {
   const [players, setPlayers] = useState(DEFAULT_PLAYERS);
   const [editingIdx, setEditingIdx] = useState(null);
   const [editVal, setEditVal] = useState("");
-  // undefined = never run, null = run failed, object = solved.
-  // Keeping the three states distinct lets us show a real "no solution"
-  // message instead of the empty placeholder when the solver gives up.
+  const [pairs, setPairs] = useState(EMPTY_PAIRS);
+  const [coed, setCoed] = useState(false);
+  const [genders, setGenders] = useState({});
   const [result, setResult] = useState(undefined);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("schedule");
 
-  const run = useCallback(() => {
-    if (new Set(players).size !== players.length) {
-      setError("Player names must be unique.");
-      return;
+  const usedInPairs = useMemo(() => {
+    const used = new Map(); // name -> rowIdx
+    pairs.forEach((p, i) => {
+      if (p.a) used.set(p.a, i);
+      if (p.b) used.set(p.b, i);
+    });
+    return used;
+  }, [pairs]);
+
+  const activePairs = useMemo(
+    () => pairs.filter(p => p.a && p.b).map(p => [p.a, p.b]),
+    [pairs]
+  );
+
+  const validate = () => {
+    if (new Set(players).size !== players.length)
+      return "Player names must be unique.";
+
+    for (let i = 0; i < pairs.length; i++) {
+      const { a, b } = pairs[i];
+      if ((a && !b) || (b && !a))
+        return `Pair ${i + 1}: pick both players or clear the row.`;
+      if (a && b && a === b)
+        return `Pair ${i + 1}: a player can't be paired with themselves.`;
     }
+    const flat = activePairs.flat();
+    if (new Set(flat).size !== flat.length)
+      return "Same player appears in more than one pair.";
+
+    if (coed) {
+      const missing = players.filter(p => !genders[p]);
+      if (missing.length) return `Set M/F for: ${missing.join(", ")}.`;
+      const males = players.filter(p => genders[p] === "M").length;
+      const females = players.filter(p => genders[p] === "F").length;
+      if (males !== 3 || females !== 3)
+        return `Coed needs 3 M + 3 F (you have ${males} M, ${females} F).`;
+      for (const [a, b] of activePairs) {
+        if (genders[a] === genders[b])
+          return `Coed conflict: ${a} & ${b} are both ${genders[a]}. Either uncheck coed or change the pair.`;
+      }
+    }
+    return null;
+  };
+
+  const run = useCallback(() => {
+    const err = validate();
+    if (err) { setError(err); return; }
     setError(null);
     setRunning(true);
     setResult(undefined);
     setTimeout(() => {
-      const res = generateSchedule(players);
+      const res = generateSchedule(players, { fixedPairs: activePairs, coed, genders });
       setResult(res);
       setRunning(false);
       setActiveTab("schedule");
     }, 50);
-  }, [players]);
+  }, [players, activePairs, coed, genders]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEdit = (i) => { setEditingIdx(i); setEditVal(players[i]); };
   const saveEdit = () => {
     if (editVal.trim()) {
-      const np = [...players];
-      np[editingIdx] = editVal.trim();
-      setPlayers(np);
+      const oldName = players[editingIdx];
+      const newName = editVal.trim();
+      if (oldName !== newName) {
+        const np = [...players];
+        np[editingIdx] = newName;
+        setPlayers(np);
+        // Carry pair selections and gender across the rename so the user
+        // doesn't lose settings just because they fixed a typo.
+        setPairs(prev => prev.map(p => ({
+          a: p.a === oldName ? newName : p.a,
+          b: p.b === oldName ? newName : p.b,
+        })));
+        setGenders(prev => {
+          if (!(oldName in prev)) return prev;
+          const { [oldName]: g, ...rest } = prev;
+          return { ...rest, [newName]: g };
+        });
+      }
     }
     setEditingIdx(null);
   };
+
+  const setPair = (rowIdx, slot, name) => {
+    setPairs(prev => prev.map((p, i) => i === rowIdx ? { ...p, [slot]: name } : p));
+  };
+  const clearPair = (rowIdx) =>
+    setPairs(prev => prev.map((p, i) => i === rowIdx ? { a: "", b: "" } : p));
+
+  const setGender = (name, g) => setGenders(prev => ({ ...prev, [name]: g }));
 
   const palette = [
     "text-blue-700", "text-pink-600", "text-green-700",
@@ -157,6 +252,18 @@ export default function App() {
     playerBg[p] = bgPalette[i % bgPalette.length];
   });
 
+  // Options for a pair dropdown in row `rowIdx`, slot `slot`. Allowed values: own current value
+  // (so it stays selected) plus any player not used in another row.
+  const pairOptionsFor = (rowIdx, slot) => {
+    const own = pairs[rowIdx][slot];
+    return players.filter(p => {
+      if (p === own) return true;
+      const usedRow = usedInPairs.get(p);
+      if (usedRow === undefined) return true;
+      return usedRow === rowIdx;
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-teal-50 p-4">
       <div className="max-w-4xl mx-auto">
@@ -172,7 +279,7 @@ export default function App() {
           <h2 className="font-bold text-gray-700 mb-3">👥 Players (click a name to edit)</h2>
           <div className="grid grid-cols-3 gap-2">
             {players.map((p, i) => (
-              <div key={i}>
+              <div key={i} className="flex flex-col gap-1">
                 {editingIdx === i ? (
                   <input
                     className="border-2 border-green-400 rounded-lg px-3 py-2 w-full text-sm font-medium focus:outline-none"
@@ -190,6 +297,79 @@ export default function App() {
                     {p}
                   </button>
                 )}
+                {coed && (
+                  <div className="flex gap-1">
+                    {["M", "F"].map(g => (
+                      <button
+                        key={g}
+                        onClick={() => setGender(p, g)}
+                        className={`flex-1 px-2 py-1 rounded text-xs font-bold border ${
+                          genders[p] === g
+                            ? (g === "M" ? "bg-blue-600 text-white border-blue-600" : "bg-pink-500 text-white border-pink-500")
+                            : "bg-white text-gray-500 border-gray-300 hover:border-gray-400"
+                        }`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Pair / Coed Settings */}
+        <div className="bg-white rounded-2xl shadow p-4 mb-4">
+          <h2 className="font-bold text-gray-700 mb-3">⚙️ Schedule Options</h2>
+
+          <label className="flex items-center gap-2 mb-4 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={coed}
+              onChange={e => setCoed(e.target.checked)}
+              className="w-4 h-4 accent-green-700"
+            />
+            <span className="text-sm font-medium text-gray-700">
+              Force coed teams (1 M + 1 F per side)
+            </span>
+          </label>
+
+          <div className="text-xs font-semibold text-gray-500 mb-2">
+            Repeat pairs (optional, up to 3) — these duos will play together twice
+          </div>
+          <div className="flex flex-col gap-2">
+            {pairs.map((pair, rowIdx) => (
+              <div key={rowIdx} className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 w-4">{rowIdx + 1}.</span>
+                <select
+                  value={pair.a}
+                  onChange={e => setPair(rowIdx, "a", e.target.value)}
+                  className="border rounded-lg px-2 py-1 text-sm flex-1 bg-white"
+                >
+                  <option value="">— player —</option>
+                  {pairOptionsFor(rowIdx, "a").map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                <span className="text-gray-400">+</span>
+                <select
+                  value={pair.b}
+                  onChange={e => setPair(rowIdx, "b", e.target.value)}
+                  className="border rounded-lg px-2 py-1 text-sm flex-1 bg-white"
+                >
+                  <option value="">— player —</option>
+                  {pairOptionsFor(rowIdx, "b").map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => clearPair(rowIdx)}
+                  className="text-gray-400 hover:text-red-500 text-sm px-2"
+                  title="Clear row"
+                >
+                  ✕
+                </button>
               </div>
             ))}
           </div>
@@ -208,7 +388,6 @@ export default function App() {
           {running ? "⏳ Generating..." : "🎯 Generate Schedule"}
         </button>
 
-        {/* Inline error — shown for client-side validation (e.g. duplicate names) */}
         {error && !running && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 text-center text-red-700 font-semibold">
             {error}
@@ -216,7 +395,7 @@ export default function App() {
         )}
 
         {/* Results */}
-        {result === undefined && !running && (
+        {result === undefined && !running && !error && (
           <div className="text-center text-gray-400 py-12">
             <p className="text-5xl mb-3">🏓</p>
             <p className="text-lg">Hit Generate to create your schedule!</p>
@@ -231,14 +410,12 @@ export default function App() {
 
         {result && (
           <>
-            {/* Iterations badge */}
             <div className="flex justify-center mb-4">
               <span className="bg-green-100 text-green-800 text-sm font-semibold px-4 py-1 rounded-full border border-green-300">
                 ✓ Solution found in {result.iterations.toLocaleString()} iteration{result.iterations !== 1 ? "s" : ""}!
               </span>
             </div>
 
-            {/* Tabs */}
             <div className="flex gap-2 mb-4">
               {["schedule", "partnerships", "verification"].map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab)}
@@ -249,7 +426,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* SCHEDULE TAB */}
             {activeTab === "schedule" && (
               <div className="bg-white rounded-2xl shadow overflow-hidden">
                 <table className="w-full text-sm">
@@ -291,7 +467,6 @@ export default function App() {
               </div>
             )}
 
-            {/* PARTNERSHIPS TAB */}
             {activeTab === "partnerships" && (
               <div className="bg-white rounded-2xl shadow overflow-hidden">
                 <div className="p-3 bg-green-50 border-b text-xs text-gray-500 flex gap-4">
@@ -333,10 +508,8 @@ export default function App() {
               </div>
             )}
 
-            {/* VERIFICATION TAB */}
             {activeTab === "verification" && (
               <div className="grid gap-3">
-                {/* Games played */}
                 <div className="bg-white rounded-2xl shadow p-4">
                   <h3 className="font-bold text-gray-700 mb-3">🎮 Games Played (each player: 6 games, 3 sit-outs)</h3>
                   <div className="grid gap-2">
@@ -362,7 +535,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* No consecutive sitouts */}
                 <div className="bg-white rounded-2xl shadow p-4">
                   <h3 className="font-bold text-gray-700 mb-3">⛔ No Consecutive Sit-outs</h3>
                   <div className="grid gap-1">
@@ -381,9 +553,10 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Partnership distribution */}
                 <div className="bg-white rounded-2xl shadow p-4">
-                  <h3 className="font-bold text-gray-700 mb-3">🤝 Partnerships (5 unique partners, 1 repeat each)</h3>
+                  <h3 className="font-bold text-gray-700 mb-3">
+                    🤝 Partnerships ({result.coed ? "3 unique partners, played twice each" : "5 unique partners, 1 repeat each"})
+                  </h3>
                   <div className="grid gap-3">
                     {players.map(p => {
                       const pm = result.partnerMap[p];
@@ -392,7 +565,9 @@ export default function App() {
                           <div className="flex items-center gap-2 mb-1">
                             <span className={`font-bold w-16 ${playerColors[p]}`}>{p}</span>
                             <span className="text-green-600 font-semibold">✓</span>
-                            <span className="text-gray-400 text-xs">5 unique partners · 1 repeat</span>
+                            <span className="text-gray-400 text-xs">
+                              {result.coed ? "3 partners · each twice" : "5 unique partners · 1 repeat"}
+                            </span>
                           </div>
                           <div className="flex flex-wrap gap-1 pl-16">
                             {Object.entries(pm).sort().map(([partner, count]) => (
@@ -408,7 +583,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* All good banner */}
                 <div className="bg-green-700 text-white rounded-2xl p-4 text-center font-bold text-lg">
                   ✓✓✓ ALL CONSTRAINTS SATISFIED ✓✓✓
                 </div>
