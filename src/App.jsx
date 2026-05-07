@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 
-const DEFAULT_PLAYERS = ["Rich", "Carol", "Steve", "Dale", "Dylan", "Tom"];
+const DEFAULT_PLAYERS = ["Rich", "Carol", "Tom", "Julie", "Steve", "Barbara"];
 
 function shuffle(arr) {
   const a = [...arr];
@@ -11,13 +11,17 @@ function shuffle(arr) {
   return a;
 }
 
-function findValidTeams(playing, partnerMap, opts) {
+const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
+function findValidTeams(playing, partnerMap, opts, lastPairKeys = new Set()) {
   const { coed, genders } = opts;
   const combos = [];
   for (let i = 0; i < playing.length - 1; i++)
     for (let j = i + 1; j < playing.length; j++)
       combos.push([playing[i], playing[j]]);
   const shuffled = shuffle(combos);
+  let best = null;
+  let bestScore = Infinity;
   for (const team1 of shuffled) {
     const team2 = playing.filter(p => !team1.includes(p));
     if (coed) {
@@ -26,14 +30,37 @@ function findValidTeams(playing, partnerMap, opts) {
     }
     if ((partnerMap[team1[0]][team1[1]] || 0) >= 2) continue;
     if ((partnerMap[team2[0]][team2[1]] || 0) >= 2) continue;
-    return [team1, team2];
+    let score = 0;
+    if (lastPairKeys.has(pairKey(team1[0], team1[1]))) score++;
+    if (lastPairKeys.has(pairKey(team2[0], team2[1]))) score++;
+    if (score < bestScore) {
+      bestScore = score;
+      best = [team1, team2];
+      if (score === 0) return best;
+    }
   }
-  return null;
+  return best;
+}
+
+function countConsecutiveRepeats(schedule) {
+  let count = 0;
+  for (let i = 1; i < schedule.length; i++) {
+    const prev = new Set([
+      pairKey(schedule[i - 1].team1[0], schedule[i - 1].team1[1]),
+      pairKey(schedule[i - 1].team2[0], schedule[i - 1].team2[1]),
+    ]);
+    if (prev.has(pairKey(schedule[i].team1[0], schedule[i].team1[1]))) count++;
+    if (prev.has(pairKey(schedule[i].team2[0], schedule[i].team2[1]))) count++;
+  }
+  return count;
 }
 
 function generateSchedule(players, opts = {}) {
   const { fixedPairs = [], coed = false, genders = {} } = opts;
   const MAX = 500000;
+  const EXTRA_AFTER_FIRST = 20000;
+  let best = null;
+  let firstFoundIter = null;
   for (let iter = 1; iter <= MAX; iter++) {
     const schedule = [];
     const partnerMap = {};
@@ -45,6 +72,7 @@ function generateSchedule(players, opts = {}) {
       sitCounts[p] = 0;
     });
     let lastSitters = new Set();
+    let lastPairKeys = new Set();
     let valid = true;
 
     for (let g = 1; g <= 9; g++) {
@@ -67,7 +95,7 @@ function generateSchedule(players, opts = {}) {
         sitters = shuffle(canSit).slice(0, 2);
       }
       const playing = players.filter(p => !sitters.includes(p));
-      const teams = findValidTeams(playing, partnerMap, { coed, genders });
+      const teams = findValidTeams(playing, partnerMap, { coed, genders }, lastPairKeys);
       if (!teams) { valid = false; break; }
 
       const [team1, team2] = teams;
@@ -79,6 +107,10 @@ function generateSchedule(players, opts = {}) {
       sitters.forEach(p => sitCounts[p]++);
       schedule.push({ game: g, team1, team2, sitting: sitters });
       lastSitters = new Set(sitters);
+      lastPairKeys = new Set([
+        pairKey(team1[0], team1[1]),
+        pairKey(team2[0], team2[1]),
+      ]);
     }
 
     if (!valid) continue;
@@ -112,9 +144,15 @@ function generateSchedule(players, opts = {}) {
     }
     if (!passed) continue;
 
-    return { schedule, partnerMap, gameCounts, iterations: iter, coed };
+    const consecutiveRepeats = countConsecutiveRepeats(schedule);
+    if (!best || consecutiveRepeats < best.consecutiveRepeats) {
+      best = { schedule, partnerMap, gameCounts, iterations: iter, coed, consecutiveRepeats };
+      if (consecutiveRepeats === 0) return best;
+    }
+    if (firstFoundIter === null) firstFoundIter = iter;
+    if (iter - firstFoundIter >= EXTRA_AFTER_FIRST) return best;
   }
-  return null;
+  return best;
 }
 
 function buildPlayerGames(schedule) {
@@ -410,9 +448,12 @@ export default function App() {
 
         {result && (
           <>
-            <div className="flex justify-center mb-4">
+            <div className="flex justify-center mb-4 gap-2 flex-wrap">
               <span className="bg-green-100 text-green-800 text-sm font-semibold px-4 py-1 rounded-full border border-green-300">
                 ✓ Solution found in {result.iterations.toLocaleString()} iteration{result.iterations !== 1 ? "s" : ""}!
+              </span>
+              <span className="bg-blue-100 text-blue-800 text-sm font-semibold px-4 py-1 rounded-full border border-blue-300">
+                Back-to-back team repeats: {result.consecutiveRepeats}
               </span>
             </div>
 
