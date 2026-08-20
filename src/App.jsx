@@ -496,6 +496,13 @@ export default function App() {
                     <span className="inline-block w-4 h-4 rounded bg-gray-100 mr-1 align-middle"></span>
                     Never partnered
                   </span>
+                  {result.partnerCap != null && (
+                    <span className={result.overCap ? "text-red-600 font-semibold" : "text-green-700"}>
+                      {result.overCap
+                        ? `⚠ ${result.overCap} pairing${result.overCap > 1 ? "s" : ""} over the ${result.partnerCap}× limit`
+                        : `✓ no pair partners more than ${result.partnerCap}×`}
+                    </span>
+                  )}
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -517,12 +524,14 @@ export default function App() {
                                 <td key={p2} className="p-3 text-center text-gray-300">—</td>
                               );
                             const count = result.partner[p1][p2] || 0;
-                            const bg =
-                              count >= 2
-                                ? "bg-yellow-200 text-yellow-800 font-bold"
-                                : count === 1
-                                ? "bg-green-200 text-green-800"
-                                : "text-gray-300";
+                            const over = result.partnerCap != null && count > result.partnerCap;
+                            const bg = over
+                              ? "bg-red-200 text-red-800 font-bold"
+                              : count >= 2
+                              ? "bg-yellow-200 text-yellow-800 font-bold"
+                              : count === 1
+                              ? "bg-green-200 text-green-800"
+                              : "text-gray-300";
                             return (
                               <td key={p2} className="p-3 text-center">
                                 <span
