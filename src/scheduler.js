@@ -20,6 +20,10 @@ export function shuffle(arr) {
 export const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 export const courtsFor = (n) => (n === 8 ? 2 : 1);
+
+const GAME_TRIES = 40;          // rerolls per game before accepting an over-cap one
+const OVER_CAP_PENALTY = 5000;  // dwarfs every soft penalty, so caps win ties
+const CAP_TIME = 8000;          // ms we will spend chasing a cap-clean schedule
 export const defaultGames = (n) => (n === 8 ? 3 : n === 7 ? 7 : 9);
 
 // Greedy matching that prefers partners who haven't played together yet.
@@ -45,6 +49,41 @@ function greedyPairs(poolA, poolB, partner) {
     }
   }
   return pairs;
+}
+
+// How often a pair may partner before we call it a repeat too many. Every
+// player plays `gamesPer` games and may draw from `pool` partners, so some pair
+// must repeat once the games outrun the pool — this is that unavoidable floor.
+// null → don't enforce (fixed couples partner every game by design).
+export function partnerCap(players, opts = {}) {
+  const { genders = {}, coed = false, segregate = false, courts = 1, numGames = 3, fixedPairs = [] } = opts;
+  if (fixedPairs.length) return null;
+  const n = players.length;
+  const men = players.filter((p) => genders[p] === "M").length;
+  const women = n - men;
+  const floor = (games, pool) => (pool < 1 ? null : Math.max(1, Math.ceil(games / pool)));
+
+  if (coed) {
+    // Half the seats go to each gender, and you only ever partner the other one.
+    if (!men || !women) return null;
+    const seats = 2 * courts * numGames;
+    const capM = floor(Math.ceil(seats / men), women);
+    const capF = floor(Math.ceil(seats / women), men);
+    if (capM == null || capF == null) return null;
+    return Math.max(capM, capF); // lenient side, so the target stays reachable
+  }
+  const pool = segregate ? Math.max(men, women) - 1 : n - 1;
+  return floor(Math.ceil((courts * 4 * numGames) / n), pool);
+}
+
+// Pairs partnered more often than the cap allows, and by how much in total.
+export function overCap(partner, players, cap) {
+  if (cap == null) return 0;
+  let excess = 0;
+  for (const p of players)
+    for (const q of Object.keys(partner[p]))
+      if (p < q && partner[p][q] > cap) excess += partner[p][q] - cap;
+  return excess;
 }
 
 // Build one game (all courts) from the playing set. null on failure.
@@ -123,7 +162,7 @@ export function chooseSitters(players, genders, coed, courts, sitCounts, lastSit
   return pickLowest(players, sitPerGame);
 }
 
-export function buildOnce(players, genders, numGames, coed, segregate, fixedPairs, courts) {
+export function buildOnce(players, genders, numGames, coed, segregate, fixedPairs, courts, cap = null) {
   const schedule = [];
   const partner = {};
   const opponent = {};
@@ -135,13 +174,30 @@ export function buildOnce(players, genders, numGames, coed, segregate, fixedPair
   });
   let lastSitters = new Set();
 
-  for (let g = 1; g <= numGames; g++) {
-    const sitters = chooseSitters(players, genders, coed, courts, sitCounts, lastSitters);
-    if (sitters === null) return null;
-    const sitSet = new Set(sitters);
-    const playing = players.filter((p) => !sitSet.has(p));
+  const locked = new Set(fixedPairs.map(([a, b]) => pairKey(a, b)));
+  // A game is "clean" when no pair in it exceeds the cap; fixed couples exempt.
+  const clean = (courtList) =>
+    cap == null ||
+    courtList.every((ct) =>
+      ct.every(([a, b]) => locked.has(pairKey(a, b)) || (partner[a][b] || 0) + 1 <= cap)
+    );
 
-    const courtList = formGame(playing, genders, coed, segregate, fixedPairs, partner);
+  for (let g = 1; g <= numGames; g++) {
+    let sitters = null;
+    let sitSet = null;
+    let courtList = null;
+    // Both sitter choice and pairing are randomised, so reroll this game a few
+    // times before giving up — far cheaper than restarting the whole schedule.
+    for (let attempt = 0; attempt < GAME_TRIES; attempt++) {
+      sitters = chooseSitters(players, genders, coed, courts, sitCounts, lastSitters);
+      if (sitters === null) return null;
+      sitSet = new Set(sitters);
+      const playing = players.filter((p) => !sitSet.has(p));
+      const built = formGame(playing, genders, coed, segregate, fixedPairs, partner);
+      if (!built) return null;
+      courtList = built;
+      if (clean(built)) break;
+    }
     if (!courtList) return null;
 
     courtList.forEach(([t1, t2]) => {
@@ -162,14 +218,18 @@ export function buildOnce(players, genders, numGames, coed, segregate, fixedPair
   return { schedule, partner, opponent, sitCounts };
 }
 
-export function scoreSchedule({ schedule, partner, opponent, sitCounts }, players, numGames) {
+export function scoreSchedule({ schedule, partner, opponent, sitCounts }, players, numGames, cap = null) {
   let score = 0;
+  // Squared so the penalty is convex: over a fixed number of partnerships a
+  // third pairing costs more than two seconds do, which is what makes the
+  // search prefer spreading repeats over stacking them on one pair.
   for (const p of players)
     for (const q of Object.keys(partner[p]))
-      if (p < q && partner[p][q] > 1) score += (partner[p][q] - 1) * 10;
+      if (p < q && partner[p][q] > 1) score += (partner[p][q] - 1) ** 2 * 10;
+  score += overCap(partner, players, cap) * OVER_CAP_PENALTY;
   for (const p of players)
     for (const q of Object.keys(opponent[p]))
-      if (p < q && opponent[p][q] > 1) score += (opponent[p][q] - 1) * 2;
+      if (p < q && opponent[p][q] > 1) score += (opponent[p][q] - 1) ** 2 * 2;
   for (let i = 1; i < schedule.length; i++) {
     const prev = new Set();
     schedule[i - 1].courts.forEach((ct) => ct.forEach((t) => prev.add(pairKey(t[0], t[1]))));
@@ -193,27 +253,45 @@ export function generateSchedule(players, opts = {}) {
   const females = players.filter((p) => genders[p] === "F").length;
   const segregate = !coed && courts === 2 && males === 4 && females === 4;
 
+  const cap = partnerCap(players, { genders, coed, segregate, courts, numGames, fixedPairs });
+
   const start = Date.now();
   const MAX = 120000;
   const STALL = 25000;
   const TIME = 2500;
   let best = null;
   let bestScore = Infinity;
+  let bestOver = Infinity;
   let lastImprove = 0;
 
   for (let iter = 1; iter <= MAX; iter++) {
-    const built = buildOnce(players, genders, numGames, coed, segregate, fixedPairs, courts);
+    const built = buildOnce(players, genders, numGames, coed, segregate, fixedPairs, courts, cap);
     if (built) {
-      const s = scoreSchedule(built, players, numGames);
+      const s = scoreSchedule(built, players, numGames, cap);
       if (s < bestScore) {
         bestScore = s;
-        best = { ...built, iterations: iter, coed, segregate, courts, numGames, score: s };
+        bestOver = overCap(built.partner, players, cap);
+        best = {
+          ...built,
+          iterations: iter,
+          coed,
+          segregate,
+          courts,
+          numGames,
+          score: s,
+          partnerCap: cap,
+          overCap: bestOver,
+        };
         lastImprove = iter;
         if (s === 0) break;
       }
     }
+    const elapsed = Date.now() - start;
+    // Keep hunting past the normal budget while any pair is still over the cap
+    // — that is the one flaw worth extra wall-clock to fix.
+    if (best && bestOver > 0 && elapsed < CAP_TIME) continue;
     if (iter - lastImprove > STALL) break;
-    if (Date.now() - start > TIME) break;
+    if (elapsed > TIME) break;
   }
   return best;
 }
