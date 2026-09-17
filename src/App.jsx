@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import {
   courtsFor,
   defaultGames,
@@ -31,6 +31,15 @@ const MAX_PLAYERS = 8;
 const MAX_PAIRS = 4;
 
 const EMPTY_PAIRS = Array.from({ length: MAX_PAIRS }, () => ({ a: "", b: "" }));
+
+// Letter portrait at the 0.4in margins set in index.css: 11in tall, 10.2in of it
+// printable = 979 CSS px, less the title line above the table and a little slack so a
+// rounding difference in the user's print dialog can't push a row onto page 2.
+const PAGE_CONTENT_PX = 979;
+const PRINT_TITLE_PX = 52;
+const PRINT_FIT_PX = Math.floor((PAGE_CONTENT_PX - PRINT_TITLE_PX) * 0.97);
+const PRINT_MIN_PT = 5;
+const PRINT_MAX_PT = 26;
 
 export default function App() {
   const [players, setPlayers] = useState(DEFAULT_PLAYERS);
@@ -221,6 +230,18 @@ export default function App() {
   };
 
   const playsPerPlayer = numGames - Math.round((sitPerGame * numGames) / players.length);
+
+  // The printed schedule has to land on ONE sheet, so the type is sized to the page
+  // rather than fixed: a 12-game night prints big enough to read taped to the fence,
+  // a 30-game two-court one prints small but still whole (Rich 2026-09-17).
+  //
+  // The size is MEASURED, not estimated — row height depends on how the sitting-out
+  // names wrap, which depends on the names themselves, so any formula would be wrong
+  // for somebody's roster. A hidden copy of the table sits off-screen at the exact
+  // width of a printed page; we binary-search the largest type that still fits inside
+  // one page's height and print at that.
+  const probeRef = useRef(null);
+  const [printFontPt, setPrintFontPt] = useState(PRINT_MIN_PT);
   const subtitle =
     `${players.length} players · ${numGames} games · ${courts} court${courts > 1 ? "s" : ""}` +
     (coed ? " · coed (mixed teams)" : courts === 2 ? " · same-gender courts" : "");
@@ -233,17 +254,88 @@ export default function App() {
     </>
   );
 
+  // Binary-search the biggest type that still fits one page. Reading offsetHeight
+  // forces a layout each round, so this walks a fixed 11 steps (~0.01pt) rather than
+  // looping to convergence, and it runs off the hidden probe so nothing on screen
+  // flickers through the candidate sizes.
+  useLayoutEffect(() => {
+    const table = probeRef.current?.querySelector("table");
+    if (!table) return;
+    let lo = PRINT_MIN_PT;
+    let hi = PRINT_MAX_PT;
+    for (let i = 0; i < 11; i++) {
+      const mid = (lo + hi) / 2;
+      probeRef.current.style.setProperty("--sched-print-font", `${mid}pt`);
+      if (table.offsetHeight <= PRINT_FIT_PX) lo = mid;
+      else hi = mid;
+    }
+    setPrintFontPt(lo);
+  }, [result, players, courts, sitPerGame]);
+
+  const scheduleTable = result ? (
+    <table className="sched-table w-full text-lg sm:text-2xl">
+      <thead>
+        <tr className="bg-green-700 text-white">
+          <th className="p-3 text-center w-12">Game</th>
+          {courts > 1 && <th className="p-3 text-left w-16">Court</th>}
+          <th className="p-3 text-left">Team 1</th>
+          <th className="p-3 text-center w-8">vs</th>
+          <th className="p-3 text-left">Team 2</th>
+          {sitPerGame > 0 && <th className="p-3 text-left">Sitting Out</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {result.schedule.map((g, gi) =>
+          g.courts.map((ct, ci) => (
+            <tr
+              key={`${g.game}-${ci}`}
+              className={`border-b ${gi % 2 === 0 ? "bg-white" : "bg-green-50"}`}
+            >
+              {ci === 0 && (
+                <td
+                  rowSpan={g.courts.length}
+                  className="p-3 text-center font-bold text-green-700 align-top"
+                >
+                  {g.game}
+                </td>
+              )}
+              {courts > 1 && (
+                <td className="p-3 text-gray-500 font-medium">{ci + 1}</td>
+              )}
+              <td className="p-3">{TeamCell(ct[0])}</td>
+              <td className="p-3 text-center text-gray-400 font-bold">vs</td>
+              <td className="p-3">{TeamCell(ct[1])}</td>
+              {sitPerGame > 0 && ci === 0 && (
+                <td
+                  rowSpan={g.courts.length}
+                  className="sit-cell p-3 text-gray-500 text-sm sm:text-base align-top"
+                >
+                  {g.sitting.map((s, si) => (
+                    <span key={si} className={`${playerColors[s]} font-medium`}>
+                      {s}
+                      {si < g.sitting.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
+                </td>
+              )}
+            </tr>
+          ))
+        )}
+      </tbody>
+    </table>
+  ) : null;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-teal-50 p-4">
+    <div className="app-shell min-h-screen bg-gradient-to-br from-green-50 to-teal-50 p-4">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="text-center mb-6">
+        <div className="text-center mb-6 no-print">
           <h1 className="text-3xl font-bold text-green-800">🏓 PB1 Pickleball Scheduler</h1>
           <p className="text-gray-500 mt-1 text-sm">{subtitle}</p>
         </div>
 
         {/* Player Names */}
-        <div className="bg-white rounded-2xl shadow p-4 mb-4">
+        <div className="bg-white rounded-2xl shadow p-4 mb-4 no-print">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-bold text-gray-700">👥 Players (click a name to edit)</h2>
             <button
@@ -363,7 +455,7 @@ export default function App() {
         </div>
 
         {/* Options */}
-        <div className="bg-white rounded-2xl shadow p-4 mb-4">
+        <div className="bg-white rounded-2xl shadow p-4 mb-4 no-print">
           <h2 className="font-bold text-gray-700 mb-3">⚙️ Schedule Options</h2>
 
           <div className="flex flex-wrap items-center gap-6 mb-4">
@@ -442,7 +534,7 @@ export default function App() {
         <button
           onClick={run}
           disabled={running}
-          className={`w-full py-3 rounded-2xl font-bold text-lg shadow transition-all mb-6 ${
+          className={`no-print w-full py-3 rounded-2xl font-bold text-lg shadow transition-all mb-6 ${
             running
               ? "bg-gray-300 text-gray-500 cursor-not-allowed"
               : "bg-green-700 text-white hover:bg-green-600 active:scale-95"
@@ -452,27 +544,33 @@ export default function App() {
         </button>
 
         {error && !running && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 text-center text-red-700 font-semibold">
+          <div className="no-print bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 text-center text-red-700 font-semibold">
             {error}
           </div>
         )}
 
         {result === undefined && !running && !error && (
-          <div className="text-center text-gray-400 py-12">
+          <div className="no-print text-center text-gray-400 py-12">
             <p className="text-5xl mb-3">🏓</p>
             <p className="text-lg">Hit Generate to create your schedule!</p>
           </div>
         )}
 
         {result === null && !running && (
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-700 font-semibold">
+          <div className="no-print bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-700 font-semibold">
             ✗ Couldn't build a schedule with those settings. Try adjusting games, couples, or genders.
           </div>
         )}
 
+        {/* Off-screen twin of the printed table, laid out at the exact width of a
+            printed page, so the fitting pass above measures the real thing. */}
+        <div ref={probeRef} aria-hidden="true" className="print-probe print-layout">
+          {scheduleTable}
+        </div>
+
         {result && (
           <>
-            <div className="flex justify-center mb-4 gap-2 flex-wrap">
+            <div className="no-print flex justify-center mb-4 gap-2 flex-wrap">
               <span className="bg-green-100 text-green-800 text-sm font-semibold px-4 py-1 rounded-full border border-green-300">
                 ✓ Found in {result.iterations.toLocaleString()} iteration
                 {result.iterations !== 1 ? "s" : ""}
@@ -487,7 +585,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="flex gap-2 mb-4">
+            <div className="no-print flex flex-wrap gap-2 mb-4 items-center">
               {["schedule", "partnerships", "verification"].map((tab) => (
                 <button
                   key={tab}
@@ -501,256 +599,225 @@ export default function App() {
                   {tab}
                 </button>
               ))}
+              <button
+                onClick={() => window.print()}
+                className="ml-auto px-4 py-2 rounded-full text-sm font-medium bg-white text-gray-600 shadow hover:bg-gray-100"
+                title="Prints the table below on one page"
+              >
+                🖨️ Print
+              </button>
             </div>
 
-            {activeTab === "schedule" && (
-              <div className="bg-white rounded-2xl shadow overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-green-700 text-white">
-                      <th className="p-3 text-center w-12">Game</th>
-                      {courts > 1 && <th className="p-3 text-left w-16">Court</th>}
-                      <th className="p-3 text-left">Team 1</th>
-                      <th className="p-3 text-center w-8">vs</th>
-                      <th className="p-3 text-left">Team 2</th>
-                      {sitPerGame > 0 && <th className="p-3 text-left">Sitting Out</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.schedule.map((g, gi) =>
-                      g.courts.map((ct, ci) => (
-                        <tr
-                          key={`${g.game}-${ci}`}
-                          className={`border-b ${gi % 2 === 0 ? "bg-white" : "bg-green-50"}`}
-                        >
-                          {ci === 0 && (
-                            <td
-                              rowSpan={g.courts.length}
-                              className="p-3 text-center font-bold text-green-700 align-top"
-                            >
-                              {g.game}
-                            </td>
-                          )}
-                          {courts > 1 && (
-                            <td className="p-3 text-gray-500 font-medium">{ci + 1}</td>
-                          )}
-                          <td className="p-3">{TeamCell(ct[0])}</td>
-                          <td className="p-3 text-center text-gray-400 font-bold">vs</td>
-                          <td className="p-3">{TeamCell(ct[1])}</td>
-                          {sitPerGame > 0 && ci === 0 && (
-                            <td
-                              rowSpan={g.courts.length}
-                              className="p-3 text-gray-400 text-xs align-top"
-                            >
-                              {g.sitting.map((s, si) => (
-                                <span key={si} className={`${playerColors[s]} font-medium`}>
-                                  {s}
-                                  {si < g.sitting.length - 1 ? ", " : ""}
-                                </span>
-                              ))}
-                            </td>
-                          )}
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+            {/* Everything from here down is what goes on paper. */}
+            <div
+              className="print-area"
+              style={{ "--sched-print-font": `${printFontPt.toFixed(1)}pt` }}
+            >
+              <div className="hidden print:block mb-2">
+                <h1 className="text-xl font-bold text-green-800">🏓 PB1 Pickleball</h1>
+                <p className="text-xs text-gray-500">{subtitle}</p>
               </div>
-            )}
 
-            {activeTab === "partnerships" && (
-              <div className="bg-white rounded-2xl shadow overflow-hidden">
-                <div className="p-3 bg-green-50 border-b text-xs text-gray-500 flex gap-4 flex-wrap">
-                  <span>
-                    <span className="inline-block w-4 h-4 rounded bg-green-200 mr-1 align-middle"></span>
-                    Once
-                  </span>
-                  <span>
-                    <span className="inline-block w-4 h-4 rounded bg-yellow-200 mr-1 align-middle"></span>
-                    Repeat partner
-                  </span>
-                  <span>
-                    <span className="inline-block w-4 h-4 rounded bg-gray-100 mr-1 align-middle"></span>
-                    Never partnered
-                  </span>
-                  {result.partnerCap != null && (
-                    <span className={result.overCap ? "text-red-600 font-semibold" : "text-green-700"}>
-                      {result.overCap
-                        ? `⚠ ${result.overCap} pairing${result.overCap > 1 ? "s" : ""} over the ${result.partnerCap}× limit`
-                        : `✓ no pair partners more than ${result.partnerCap}×`}
+              {activeTab === "schedule" && (
+                <div className="bg-white rounded-2xl shadow overflow-x-auto">
+                  {scheduleTable}
+                </div>
+              )}
+
+              {activeTab === "partnerships" && (
+                <div className="bg-white rounded-2xl shadow overflow-hidden">
+                  <div className="p-3 bg-green-50 border-b text-xs text-gray-500 flex gap-4 flex-wrap">
+                    <span>
+                      <span className="inline-block w-4 h-4 rounded bg-green-200 mr-1 align-middle"></span>
+                      Once
                     </span>
-                  )}
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-green-700 text-white">
-                        <th className="p-3 text-left">Player</th>
-                        {players.map((p) => (
-                          <th key={p} className="p-3 text-center font-semibold">{p}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {players.map((p1, i) => (
-                        <tr key={p1} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
-                          <td className={`p-3 font-bold ${playerColors[p1]}`}>{p1}</td>
-                          {players.map((p2) => {
-                            if (p1 === p2)
-                              return (
-                                <td key={p2} className="p-3 text-center text-gray-300">—</td>
-                              );
-                            const count = result.partner[p1][p2] || 0;
-                            const over = result.partnerCap != null && count > result.partnerCap;
-                            const bg = over
-                              ? "bg-red-200 text-red-800 font-bold"
-                              : count >= 2
-                              ? "bg-yellow-200 text-yellow-800 font-bold"
-                              : count === 1
-                              ? "bg-green-200 text-green-800"
-                              : "text-gray-300";
-                            return (
-                              <td key={p2} className="p-3 text-center">
-                                <span
-                                  className={`inline-block w-7 h-7 rounded-full leading-7 text-sm font-semibold ${bg}`}
-                                >
-                                  {count || "0"}
-                                </span>
-                              </td>
-                            );
-                          })}
+                    <span>
+                      <span className="inline-block w-4 h-4 rounded bg-yellow-200 mr-1 align-middle"></span>
+                      Repeat partner
+                    </span>
+                    <span>
+                      <span className="inline-block w-4 h-4 rounded bg-gray-100 mr-1 align-middle"></span>
+                      Never partnered
+                    </span>
+                    {result.partnerCap != null && (
+                      <span className={result.overCap ? "text-red-600 font-semibold" : "text-green-700"}>
+                        {result.overCap
+                          ? `⚠ ${result.overCap} pairing${result.overCap > 1 ? "s" : ""} over the ${result.partnerCap}× limit`
+                          : `✓ no pair partners more than ${result.partnerCap}×`}
+                      </span>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-green-700 text-white">
+                          <th className="p-3 text-left">Player</th>
+                          {players.map((p) => (
+                            <th key={p} className="p-3 text-center font-semibold">{p}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "verification" && (
-              <div className="grid gap-3">
-                {(() => {
-                  // A staged schedule is built as an optimal block plus an extension, so
-                  // show it judged at BOTH stopping points: quit at the block and it is
-                  // still fair, play on and it is fair at the end too.
-                  const block = fairBlock(players.length, courts);
-                  const stages =
-                    block && result.schedule.length > block
-                      ? [block, result.schedule.length]
-                      : [result.schedule.length];
-                  const rows = stages.map((n) => analyzeSchedule(result.schedule, players, n));
-                  const fmt = (h) =>
-                    Object.entries(h)
-                      .sort((a, b) => a[0] - b[0])
-                      .map(([times, pairs]) => `${pairs}×${times === "0" ? "never" : `${times}x`}`)
-                      .join(", ");
-                  return (
-                    <div className="bg-white rounded-2xl shadow p-4">
-                      <h3 className="font-bold text-gray-700 mb-1">
-                        📊 Fairness{stages.length > 1 ? " at each stopping point" : ""}
-                      </h3>
-                      <p className="text-xs text-gray-400 mb-3">
-                        {stages.length > 1
-                          ? `Built as an optimal ${block} then ${
-                              result.schedule.length - block
-                            } more chosen against those ${block}, so stopping early is still fair.`
-                          : "How evenly partners and opponents are spread."}
-                      </p>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-green-700 text-white">
-                              <th className="p-2 text-left">After</th>
-                              <th className="p-2 text-left">Partners</th>
-                              <th className="p-2 text-left">Opponents</th>
-                              <th className="p-2 text-left">Plays</th>
-                              {sitPerGame > 0 && <th className="p-2 text-left">Sits</th>}
-                              <th className="p-2 text-center">Best possible</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rows.map((a, i) => (
-                              <tr key={a.games} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
-                                <td className="p-2 font-bold text-green-700">{a.games} games</td>
-                                <td className="p-2">
-                                  {fmt(a.partners)}
-                                  {a.neverPartnered > 0 && (
-                                    <span className="text-red-600 font-semibold">
-                                      {" "}
-                                      — {a.neverPartnered} pair
-                                      {a.neverPartnered > 1 ? "s" : ""} never together
-                                    </span>
-                                  )}
+                      </thead>
+                      <tbody>
+                        {players.map((p1, i) => (
+                          <tr key={p1} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
+                            <td className={`p-3 font-bold ${playerColors[p1]}`}>{p1}</td>
+                            {players.map((p2) => {
+                              if (p1 === p2)
+                                return (
+                                  <td key={p2} className="p-3 text-center text-gray-300">—</td>
+                                );
+                              const count = result.partner[p1][p2] || 0;
+                              const over = result.partnerCap != null && count > result.partnerCap;
+                              const bg = over
+                                ? "bg-red-200 text-red-800 font-bold"
+                                : count >= 2
+                                ? "bg-yellow-200 text-yellow-800 font-bold"
+                                : count === 1
+                                ? "bg-green-200 text-green-800"
+                                : "text-gray-300";
+                              return (
+                                <td key={p2} className="p-3 text-center">
+                                  <span
+                                    className={`inline-block w-7 h-7 rounded-full leading-7 text-sm font-semibold ${bg}`}
+                                  >
+                                    {count || "0"}
+                                  </span>
                                 </td>
-                                <td className="p-2 text-gray-600">{fmt(a.opponents)}</td>
-                                <td className="p-2 text-gray-600">
-                                  {a.playSpread[0] === a.playSpread[1]
-                                    ? `${a.playSpread[0]} each`
-                                    : `${a.playSpread[0]}–${a.playSpread[1]}`}
-                                </td>
-                                {sitPerGame > 0 && (
-                                  <td className="p-2 text-gray-600">
-                                    {a.sitSpread[0] === a.sitSpread[1]
-                                      ? `${a.sitSpread[0]} each`
-                                      : `${a.sitSpread[0]}–${a.sitSpread[1]}`}
-                                  </td>
-                                )}
-                                <td className="p-2 text-center">
-                                  {a.partnersOptimal ? (
-                                    <span className="text-green-700 font-semibold">★ optimal</span>
-                                  ) : (
-                                    <span className="text-gray-400" title={`best: ${fmt(a.bestPartners)}`}>
-                                      near ({fmt(a.bestPartners)})
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                <div className="bg-white rounded-2xl shadow p-4">
-                  <h3 className="font-bold text-gray-700 mb-3">🎮 Games played</h3>
-                  <div className="grid gap-2">
-                    {players.map((p) => {
-                      const games = buildPlayerGames(result.schedule)[p] || [];
-                      const allGames = Array.from({ length: numGames }, (_, k) => k + 1);
-                      const sits = allGames.filter((g) => !games.includes(g));
-                      return (
-                        <div key={p} className="flex items-center gap-2 text-sm flex-wrap">
-                          <span className={`font-bold w-16 ${playerColors[p]}`}>{p}</span>
-                          <span className="text-green-600 font-semibold">{games.length}×</span>
-                          <div className="flex gap-1 flex-wrap">
-                            {allGames.map((g) => (
-                              <span
-                                key={g}
-                                className={`w-6 h-6 rounded text-xs flex items-center justify-center font-semibold ${
-                                  games.includes(g)
-                                    ? `${playerBg[p]} ${playerColors[p]}`
-                                    : "bg-gray-100 text-gray-300"
-                                }`}
-                              >
-                                {g}
-                              </span>
-                            ))}
-                          </div>
-                          {sitPerGame > 0 && (
-                            <span className="text-gray-400 text-xs">
-                              sits: {sits.length ? sits.join(", ") : "none"}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
+              )}
 
-              </div>
-            )}
+              {activeTab === "verification" && (
+                <div className="grid gap-3">
+                  {(() => {
+                    // A staged schedule is built as an optimal block plus an extension, so
+                    // show it judged at BOTH stopping points: quit at the block and it is
+                    // still fair, play on and it is fair at the end too.
+                    const block = fairBlock(players.length, courts);
+                    const stages =
+                      block && result.schedule.length > block
+                        ? [block, result.schedule.length]
+                        : [result.schedule.length];
+                    const rows = stages.map((n) => analyzeSchedule(result.schedule, players, n));
+                    const fmt = (h) =>
+                      Object.entries(h)
+                        .sort((a, b) => a[0] - b[0])
+                        .map(([times, pairs]) => `${pairs}×${times === "0" ? "never" : `${times}x`}`)
+                        .join(", ");
+                    return (
+                      <div className="bg-white rounded-2xl shadow p-4">
+                        <h3 className="font-bold text-gray-700 mb-1">
+                          📊 Fairness{stages.length > 1 ? " at each stopping point" : ""}
+                        </h3>
+                        <p className="text-xs text-gray-400 mb-3">
+                          {stages.length > 1
+                            ? `Built as an optimal ${block} then ${
+                                result.schedule.length - block
+                              } more chosen against those ${block}, so stopping early is still fair.`
+                            : "How evenly partners and opponents are spread."}
+                        </p>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-green-700 text-white">
+                                <th className="p-2 text-left">After</th>
+                                <th className="p-2 text-left">Partners</th>
+                                <th className="p-2 text-left">Opponents</th>
+                                <th className="p-2 text-left">Plays</th>
+                                {sitPerGame > 0 && <th className="p-2 text-left">Sits</th>}
+                                <th className="p-2 text-center">Best possible</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((a, i) => (
+                                <tr key={a.games} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
+                                  <td className="p-2 font-bold text-green-700">{a.games} games</td>
+                                  <td className="p-2">
+                                    {fmt(a.partners)}
+                                    {a.neverPartnered > 0 && (
+                                      <span className="text-red-600 font-semibold">
+                                        {" "}
+                                        — {a.neverPartnered} pair
+                                        {a.neverPartnered > 1 ? "s" : ""} never together
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="p-2 text-gray-600">{fmt(a.opponents)}</td>
+                                  <td className="p-2 text-gray-600">
+                                    {a.playSpread[0] === a.playSpread[1]
+                                      ? `${a.playSpread[0]} each`
+                                      : `${a.playSpread[0]}–${a.playSpread[1]}`}
+                                  </td>
+                                  {sitPerGame > 0 && (
+                                    <td className="p-2 text-gray-600">
+                                      {a.sitSpread[0] === a.sitSpread[1]
+                                        ? `${a.sitSpread[0]} each`
+                                        : `${a.sitSpread[0]}–${a.sitSpread[1]}`}
+                                    </td>
+                                  )}
+                                  <td className="p-2 text-center">
+                                    {a.partnersOptimal ? (
+                                      <span className="text-green-700 font-semibold">★ optimal</span>
+                                    ) : (
+                                      <span className="text-gray-400" title={`best: ${fmt(a.bestPartners)}`}>
+                                        near ({fmt(a.bestPartners)})
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="bg-white rounded-2xl shadow p-4">
+                    <h3 className="font-bold text-gray-700 mb-3">🎮 Games played</h3>
+                    <div className="grid gap-2">
+                      {players.map((p) => {
+                        const games = buildPlayerGames(result.schedule)[p] || [];
+                        const allGames = Array.from({ length: numGames }, (_, k) => k + 1);
+                        const sits = allGames.filter((g) => !games.includes(g));
+                        return (
+                          <div key={p} className="flex items-center gap-2 text-sm flex-wrap">
+                            <span className={`font-bold w-16 ${playerColors[p]}`}>{p}</span>
+                            <span className="text-green-600 font-semibold">{games.length}×</span>
+                            <div className="flex gap-1 flex-wrap">
+                              {allGames.map((g) => (
+                                <span
+                                  key={g}
+                                  className={`w-6 h-6 rounded text-xs flex items-center justify-center font-semibold ${
+                                    games.includes(g)
+                                      ? `${playerBg[p]} ${playerColors[p]}`
+                                      : "bg-gray-100 text-gray-300"
+                                  }`}
+                                >
+                                  {g}
+                                </span>
+                              ))}
+                            </div>
+                            {sitPerGame > 0 && (
+                              <span className="text-gray-400 text-xs">
+                                sits: {sits.length ? sits.join(", ") : "none"}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>

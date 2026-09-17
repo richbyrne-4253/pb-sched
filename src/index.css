@@ -1,1 +1,101 @@
 @import "tailwindcss";
+
+/* Printing a schedule is the point of the app on court night: the sheet gets taped
+   to the fence, so the type wants to be as big as one page allows. The app chrome
+   (roster, options, buttons) is screen-only; the table is sized from the row count
+   by --sched-print-font, set on .print-area in App.jsx. */
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 0.4in;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /* Player colours and the green header band are how you find your name at a
+     glance — keep them on paper rather than letting the browser drop them. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  .app-shell {
+    background: none !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+  }
+
+  .print-area {
+    max-width: none;
+  }
+
+  .print-area .rounded-2xl {
+    border-radius: 0 !important;
+  }
+
+  .print-area .shadow {
+    box-shadow: none !important;
+  }
+
+  /* The probe has done its job by now and must not print. */
+  .print-probe {
+    display: none !important;
+  }
+
+  /* Mirrors .print-layout below, which is what the hidden probe is measured under:
+     the fitted type only fits if the page uses the same metrics, so change both. */
+  .print-area table.sched-table {
+    width: 100%;
+    font-size: var(--sched-print-font, 12pt) !important;
+    line-height: 1.25 !important;
+  }
+
+  .print-area .sched-table th,
+  .print-area .sched-table td {
+    padding: 0.25em 0.45em !important;
+  }
+
+  .print-area .sched-table .sit-cell {
+    font-size: 0.8em !important;
+  }
+
+  /* A game must not be split across the fold. */
+  .print-area tr {
+    break-inside: avoid;
+  }
+}
+
+/* The hidden twin used to size the printed type: a printed letter page is 8.5in wide
+   less the 0.4in margins, so the probe is laid out at exactly that width and the
+   heights it reports are the heights the printer will produce. */
+.print-probe {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 7.7in;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* The printed table's own metrics, shared by the probe and by @media print. */
+.print-layout table.sched-table {
+  width: 100%;
+  font-size: var(--sched-print-font, 12pt) !important;
+  line-height: 1.25 !important;
+}
+
+.print-layout .sched-table th,
+.print-layout .sched-table td {
+  padding: 0.25em 0.45em !important;
+}
+
+.print-layout .sched-table .sit-cell {
+  font-size: 0.8em !important;
+}
