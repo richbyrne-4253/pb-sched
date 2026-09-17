@@ -21,6 +21,30 @@ export const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 export const courtsFor = (n) => (n === 8 ? 2 : 1);
 
+// The game count at which a roster's schedule is already as level as the
+// arithmetic allows — its natural stopping point.
+//   6 players, 1 court  → 9 games: every pair partners once, 3 pairs twice, everyone sits 3.
+//   8 players, 2 courts → 7 games: every pair partners exactly once and opposes exactly twice.
+// Past that point a schedule built in one pass is fair only at the finish line: it
+// reaches the same end state, but stop it early and you are mid-pattern, with some
+// pairs never having partnered. Building the block first and extending from it is
+// fair at BOTH stopping points, which matters because the night ends when it ends
+// (Rich 2026-09-17). null → no natural block, build in one pass as before.
+export function fairBlock(n, courts) {
+  if (courts === 1 && n === 6) return 9;
+  if (courts === 2 && n === 8) return 7;
+  return null;
+}
+
+// Per-player count maps start empty, or carry a frozen prefix's totals forward.
+function seedCounts(players, src) {
+  const out = {};
+  players.forEach((p) => {
+    out[p] = { ...((src && src[p]) || {}) };
+  });
+  return out;
+}
+
 const GAME_TRIES = 40;          // rerolls per game before accepting an over-cap one
 const OVER_CAP_PENALTY = 5000;  // dwarfs every soft penalty, so caps win ties
 const CAP_TIME = 8000;          // ms we will spend chasing a cap-clean schedule
@@ -162,17 +186,18 @@ export function chooseSitters(players, genders, coed, courts, sitCounts, lastSit
   return pickLowest(players, sitPerGame);
 }
 
-export function buildOnce(players, genders, numGames, coed, segregate, fixedPairs, courts, cap = null) {
+// `seed` continues a frozen earlier stage: its partner/opponent/sit totals carry in,
+// so the games built here are chosen against what has already been played.
+export function buildOnce(players, genders, numGames, coed, segregate, fixedPairs, courts, cap = null, seed = null) {
   const schedule = [];
-  const partner = {};
-  const opponent = {};
+  const partner = seedCounts(players, seed && seed.partner);
+  const opponent = seedCounts(players, seed && seed.opponent);
   const sitCounts = {};
   players.forEach((p) => {
-    partner[p] = {};
-    opponent[p] = {};
-    sitCounts[p] = 0;
+    sitCounts[p] = (seed && seed.sitCounts && seed.sitCounts[p]) || 0;
   });
-  let lastSitters = new Set();
+  let lastSitters = new Set((seed && seed.lastSitters) || []);
+  const gameOffset = (seed && seed.schedule && seed.schedule.length) || 0;
 
   const locked = new Set(fixedPairs.map(([a, b]) => pairKey(a, b)));
   // A game is "clean" when no pair in it exceeds the cap; fixed couples exempt.
@@ -212,10 +237,12 @@ export function buildOnce(players, genders, numGames, coed, segregate, fixedPair
     });
 
     sitters.forEach((p) => sitCounts[p]++);
-    schedule.push({ game: g, courts: courtList, sitting: sitters });
+    schedule.push({ game: gameOffset + g, courts: courtList, sitting: sitters });
     lastSitters = sitSet;
   }
-  return { schedule, partner, opponent, sitCounts };
+  // The caller scores the whole night, so hand back the prefix's games too.
+  const full = seed && seed.schedule ? [...seed.schedule, ...schedule] : schedule;
+  return { schedule: full, partner, opponent, sitCounts, lastSitters: [...lastSitters] };
 }
 
 export function scoreSchedule({ schedule, partner, opponent, sitCounts }, players, numGames, cap = null) {
@@ -253,47 +280,137 @@ export function generateSchedule(players, opts = {}) {
   const females = players.filter((p) => genders[p] === "F").length;
   const segregate = !coed && courts === 2 && males === 4 && females === 4;
 
-  const cap = partnerCap(players, { genders, coed, segregate, courts, numGames, fixedPairs });
-
-  const start = Date.now();
   const MAX = 120000;
   const STALL = 25000;
   const TIME = 2500;
-  let best = null;
-  let bestScore = Infinity;
-  let bestOver = Infinity;
-  let lastImprove = 0;
+  const STAGE_TIME = 1500; // two stages, so keep the pair inside the one-pass budget
 
-  for (let iter = 1; iter <= MAX; iter++) {
-    const built = buildOnce(players, genders, numGames, coed, segregate, fixedPairs, courts, cap);
-    if (built) {
-      const s = scoreSchedule(built, players, numGames, cap);
-      if (s < bestScore) {
-        bestScore = s;
-        bestOver = overCap(built.partner, players, cap);
-        best = {
-          ...built,
-          iterations: iter,
-          coed,
-          segregate,
-          courts,
-          numGames,
-          score: s,
-          partnerCap: cap,
-          overCap: bestOver,
-        };
-        lastImprove = iter;
-        if (s === 0) break;
+  // One search pass: build `count` games on top of `seed` (null → from scratch).
+  // Scoring always judges the WHOLE night, so an extension game is chosen against
+  // what the frozen stage before it already played.
+  const searchBest = (count, seed, totalGames, budget) => {
+    const cap = partnerCap(players, { genders, coed, segregate, courts, numGames: totalGames, fixedPairs });
+    const start = Date.now();
+    let best = null;
+    let bestScore = Infinity;
+    let bestOver = Infinity;
+    let lastImprove = 0;
+
+    for (let iter = 1; iter <= MAX; iter++) {
+      const built = buildOnce(players, genders, count, coed, segregate, fixedPairs, courts, cap, seed);
+      if (built) {
+        const s = scoreSchedule(built, players, totalGames, cap);
+        if (s < bestScore) {
+          bestScore = s;
+          bestOver = overCap(built.partner, players, cap);
+          best = {
+            ...built,
+            iterations: iter,
+            coed,
+            segregate,
+            courts,
+            numGames: totalGames,
+            score: s,
+            partnerCap: cap,
+            overCap: bestOver,
+          };
+          lastImprove = iter;
+          if (s === 0) break;
+        }
       }
+      const elapsed = Date.now() - start;
+      // Keep hunting past the normal budget while any pair is still over the cap
+      // — that is the one flaw worth extra wall-clock to fix.
+      if (best && bestOver > 0 && elapsed < CAP_TIME) continue;
+      if (iter - lastImprove > STALL) break;
+      if (elapsed > budget) break;
     }
-    const elapsed = Date.now() - start;
-    // Keep hunting past the normal budget while any pair is still over the cap
-    // — that is the one flaw worth extra wall-clock to fix.
-    if (best && bestOver > 0 && elapsed < CAP_TIME) continue;
-    if (iter - lastImprove > STALL) break;
-    if (elapsed > TIME) break;
+    return best;
+  };
+
+  // Past a roster's fair block, build the block first and extend from it, so the
+  // schedule is fair if you stop at the block AND when you finish. Fixed couples
+  // partner every game by design, so there is no pattern to complete — those build
+  // in one pass, as does any roster with no natural block.
+  const block = fairBlock(players.length, courts);
+  if (block && numGames > block && !fixedPairs.length) {
+    const first = searchBest(block, null, block, STAGE_TIME);
+    if (first) {
+      const staged = searchBest(numGames - block, first, numGames, STAGE_TIME);
+      if (staged) return staged;
+    }
   }
-  return best;
+  return searchBest(numGames, null, numGames, TIME);
+}
+
+// Fairness of the first `upto` games, for showing that a staged schedule is fair at
+// its block AND at the finish — not only at the finish (Rich 2026-09-17).
+// Counts are histograms: { [timesTogether]: howManyPairs }.
+export function analyzeSchedule(schedule, players, upto = schedule.length) {
+  const pc = {};
+  const oc = {};
+  const sits = {};
+  players.forEach((p) => (sits[p] = 0));
+  const bump = (m, a, b) => {
+    const k = pairKey(a, b);
+    m[k] = (m[k] || 0) + 1;
+  };
+  schedule.slice(0, upto).forEach((g) => {
+    g.courts.forEach(([t1, t2]) => {
+      bump(pc, t1[0], t1[1]);
+      bump(pc, t2[0], t2[1]);
+      for (const a of t1) for (const b of t2) bump(oc, a, b);
+    });
+    (g.sitting || []).forEach((p) => {
+      if (p in sits) sits[p]++;
+    });
+  });
+
+  const allPairs = [];
+  for (let i = 0; i < players.length; i++)
+    for (let j = i + 1; j < players.length; j++) allPairs.push(pairKey(players[i], players[j]));
+  const histogram = (m) => {
+    const h = {};
+    allPairs.forEach((k) => {
+      const v = m[k] || 0;
+      h[v] = (h[v] || 0) + 1;
+    });
+    return h;
+  };
+  const partnerCounts = allPairs.map((k) => pc[k] || 0);
+  const plays = players.map((p) => upto - sits[p]);
+
+  // The best any schedule of this length could do: spread the available slots as
+  // evenly as the arithmetic allows. Partner slots are 2 per court per game.
+  const courts = schedule[0] ? schedule[0].courts.length : 1;
+  const level = (slots, buckets) => {
+    const base = Math.floor(slots / buckets);
+    const over = slots % buckets;
+    const h = {};
+    if (buckets - over > 0) h[base] = buckets - over;
+    if (over > 0) h[base + 1] = over;
+    return h;
+  };
+  const best = {
+    partners: level(2 * courts * upto, allPairs.length),
+    opponents: level(4 * courts * upto, allPairs.length),
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  return {
+    games: upto,
+    partners: histogram(pc),
+    opponents: histogram(oc),
+    bestPartners: best.partners,
+    bestOpponents: best.opponents,
+    partnersOptimal: same(histogram(pc), best.partners),
+    opponentsOptimal: same(histogram(oc), best.opponents),
+    neverPartnered: partnerCounts.filter((c) => c === 0).length,
+    maxPartner: Math.max(...partnerCounts),
+    sits: { ...sits },
+    playSpread: [Math.min(...plays), Math.max(...plays)],
+    sitSpread: [Math.min(...players.map((p) => sits[p])), Math.max(...players.map((p) => sits[p]))],
+  };
 }
 
 export function buildPlayerGames(schedule) {

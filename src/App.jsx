@@ -1,5 +1,12 @@
 import { useState, useCallback, useMemo } from "react";
-import { courtsFor, defaultGames, generateSchedule, buildPlayerGames } from "./scheduler.js";
+import {
+  courtsFor,
+  defaultGames,
+  generateSchedule,
+  buildPlayerGames,
+  fairBlock,
+  analyzeSchedule,
+} from "./scheduler.js";
 
 // 8 players (4M + 4F) is the headline use case: 2 courts, coed or same-gender.
 const DEFAULT_PLAYERS = ["Rich", "Tom", "Steve", "Mike", "Carol", "Julie", "Barbara", "Lisa"];
@@ -552,6 +559,90 @@ export default function App() {
 
             {activeTab === "verification" && (
               <div className="grid gap-3">
+                {(() => {
+                  // A staged schedule is built as an optimal block plus an extension, so
+                  // show it judged at BOTH stopping points: quit at the block and it is
+                  // still fair, play on and it is fair at the end too.
+                  const block = fairBlock(players.length, courts);
+                  const stages =
+                    block && result.schedule.length > block
+                      ? [block, result.schedule.length]
+                      : [result.schedule.length];
+                  const rows = stages.map((n) => analyzeSchedule(result.schedule, players, n));
+                  const fmt = (h) =>
+                    Object.entries(h)
+                      .sort((a, b) => a[0] - b[0])
+                      .map(([times, pairs]) => `${pairs}×${times === "0" ? "never" : `${times}x`}`)
+                      .join(", ");
+                  return (
+                    <div className="bg-white rounded-2xl shadow p-4">
+                      <h3 className="font-bold text-gray-700 mb-1">
+                        📊 Fairness{stages.length > 1 ? " at each stopping point" : ""}
+                      </h3>
+                      <p className="text-xs text-gray-400 mb-3">
+                        {stages.length > 1
+                          ? `Built as an optimal ${block} then ${
+                              result.schedule.length - block
+                            } more chosen against those ${block}, so stopping early is still fair.`
+                          : "How evenly partners and opponents are spread."}
+                      </p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-green-700 text-white">
+                              <th className="p-2 text-left">After</th>
+                              <th className="p-2 text-left">Partners</th>
+                              <th className="p-2 text-left">Opponents</th>
+                              <th className="p-2 text-left">Plays</th>
+                              {sitPerGame > 0 && <th className="p-2 text-left">Sits</th>}
+                              <th className="p-2 text-center">Best possible</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((a, i) => (
+                              <tr key={a.games} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
+                                <td className="p-2 font-bold text-green-700">{a.games} games</td>
+                                <td className="p-2">
+                                  {fmt(a.partners)}
+                                  {a.neverPartnered > 0 && (
+                                    <span className="text-red-600 font-semibold">
+                                      {" "}
+                                      — {a.neverPartnered} pair
+                                      {a.neverPartnered > 1 ? "s" : ""} never together
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-2 text-gray-600">{fmt(a.opponents)}</td>
+                                <td className="p-2 text-gray-600">
+                                  {a.playSpread[0] === a.playSpread[1]
+                                    ? `${a.playSpread[0]} each`
+                                    : `${a.playSpread[0]}–${a.playSpread[1]}`}
+                                </td>
+                                {sitPerGame > 0 && (
+                                  <td className="p-2 text-gray-600">
+                                    {a.sitSpread[0] === a.sitSpread[1]
+                                      ? `${a.sitSpread[0]} each`
+                                      : `${a.sitSpread[0]}–${a.sitSpread[1]}`}
+                                  </td>
+                                )}
+                                <td className="p-2 text-center">
+                                  {a.partnersOptimal ? (
+                                    <span className="text-green-700 font-semibold">★ optimal</span>
+                                  ) : (
+                                    <span className="text-gray-400" title={`best: ${fmt(a.bestPartners)}`}>
+                                      near ({fmt(a.bestPartners)})
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="bg-white rounded-2xl shadow p-4">
                   <h3 className="font-bold text-gray-700 mb-3">🎮 Games played</h3>
                   <div className="grid gap-2">
