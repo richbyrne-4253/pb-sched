@@ -10,10 +10,21 @@ import {
 
 // 6 players on one court is the usual game: two sit out each round, and 12 games
 // fills a long session (Rich 2026-09-17). Add players for the 8-player, 2-court case.
-const DEFAULT_PLAYERS = ["Rich", "Tom", "Steve", "Mike", "Dave", "Paul"];
+const DEFAULT_PLAYERS = ["Rich", "Tom", "Slater", "Kiran", "Mayank", "Martin"];
 const DEFAULT_GENDERS = {
-  Rich: "M", Tom: "M", Steve: "M", Mike: "M", Dave: "M", Paul: "M",
+  Rich: "M", Tom: "M", Slater: "M", Kiran: "M", Mayank: "M", Martin: "M",
 };
+
+// The regulars, offered as a dropdown on each name so a roster is a few taps rather
+// than six lots of typing. Whichever of M/F the player is set to picks the list; any
+// name can still be typed in free-hand (Rich 2026-09-17). Kept alphabetical.
+const MEN_NAMES = [
+  "Alex", "Charles", "Cohen", "Dale", "Kiran", "Martin",
+  "Mayank", "Rich", "Slater", "Solomon", "Tom", "Vinny",
+].sort((a, b) => a.localeCompare(b));
+const WOMEN_NAMES = ["Barbara", "Carol", "Harriet", "Julie", "Sweta"].sort((a, b) =>
+  a.localeCompare(b)
+);
 
 const MIN_PLAYERS = 6;
 const MAX_PLAYERS = 8;
@@ -181,6 +192,15 @@ export default function App() {
     playerBg[p] = bgPalette[i % bgPalette.length];
   });
 
+  // Suggestions for one player's name box: the regulars of whichever gender that
+  // player is set to, minus anyone already on the roster (so the list can't hand you
+  // a duplicate). Free text still wins — this only populates the dropdown.
+  const nameOptionsFor = (player) => {
+    const pool = genders[player] === "F" ? WOMEN_NAMES : MEN_NAMES;
+    const taken = new Set(players.filter((q) => q !== player));
+    return pool.filter((n) => !taken.has(n));
+  };
+
   const pairOptionsFor = (rowIdx, slot) => {
     const own = pairs[rowIdx][slot];
     return players.filter((p) => {
@@ -234,14 +254,24 @@ export default function App() {
               <div key={i} className="flex flex-col gap-1">
                 <div className="flex items-stretch gap-1">
                   {editingIdx === i ? (
-                    <input
-                      className="border-2 border-green-400 rounded-lg px-3 py-2 w-full text-sm font-medium focus:outline-none"
-                      value={editVal}
-                      onChange={(e) => setEditVal(e.target.value)}
-                      onBlur={saveEdit}
-                      onKeyDown={(e) => e.key === "Enter" && saveEdit()}
-                      autoFocus
-                    />
+                    <>
+                      <input
+                        className="border-2 border-green-400 rounded-lg px-3 py-2 w-full text-sm font-medium focus:outline-none"
+                        list={`names-${i}`}
+                        value={editVal}
+                        onChange={(e) => setEditVal(e.target.value)}
+                        onBlur={saveEdit}
+                        onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                        placeholder="pick or type a name"
+                        autoFocus
+                      />
+                      {/* Suggestions only — the input stays free text, so anyone can be typed in. */}
+                      <datalist id={`names-${i}`}>
+                        {nameOptionsFor(p).map((n) => (
+                          <option key={n} value={n} />
+                        ))}
+                      </datalist>
+                    </>
                   ) : (
                     <button
                       onClick={() => startEdit(i)}
