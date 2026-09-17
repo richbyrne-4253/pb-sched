@@ -8,11 +8,11 @@ import {
   analyzeSchedule,
 } from "./scheduler.js";
 
-// 8 players (4M + 4F) is the headline use case: 2 courts, coed or same-gender.
-const DEFAULT_PLAYERS = ["Rich", "Tom", "Steve", "Mike", "Carol", "Julie", "Barbara", "Lisa"];
+// 6 players on one court is the usual game: two sit out each round, and 12 games
+// fills a long session (Rich 2026-09-17). Add players for the 8-player, 2-court case.
+const DEFAULT_PLAYERS = ["Rich", "Tom", "Steve", "Mike", "Dave", "Paul"];
 const DEFAULT_GENDERS = {
-  Rich: "M", Tom: "M", Steve: "M", Mike: "M",
-  Carol: "F", Julie: "F", Barbara: "F", Lisa: "F",
+  Rich: "M", Tom: "M", Steve: "M", Mike: "M", Dave: "M", Paul: "M",
 };
 
 const MIN_PLAYERS = 6;
