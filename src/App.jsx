@@ -679,65 +679,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {sitPerGame > 0 && (
-                  <div className="bg-white rounded-2xl shadow p-4">
-                    <h3 className="font-bold text-gray-700 mb-3">⛔ No back-to-back sit-outs</h3>
-                    <div className="grid gap-1">
-                      {players.map((p) => {
-                        const games = buildPlayerGames(result.schedule)[p] || [];
-                        const sits = Array.from({ length: numGames }, (_, k) => k + 1)
-                          .filter((g) => !games.includes(g))
-                          .sort((a, b) => a - b);
-                        const consec = sits.some((s, i) => i > 0 && s - sits[i - 1] === 1);
-                        return (
-                          <div key={p} className="flex items-center gap-2 text-sm">
-                            <span className={`font-bold w-16 ${playerColors[p]}`}>{p}</span>
-                            <span className={consec ? "text-red-500" : "text-green-600"}>
-                              {consec ? "✗" : "✓"}
-                            </span>
-                            <span className="text-gray-500">
-                              sits out: {sits.length ? sits.join(", ") : "never"}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div className="bg-white rounded-2xl shadow p-4">
-                  <h3 className="font-bold text-gray-700 mb-3">🤝 Partner variety</h3>
-                  <div className="grid gap-3">
-                    {players.map((p) => {
-                      const pm = result.partner[p];
-                      const entries = Object.entries(pm).filter(([, c]) => c > 0);
-                      return (
-                        <div key={p} className="text-sm">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className={`font-bold w-16 ${playerColors[p]}`}>{p}</span>
-                            <span className="text-gray-400 text-xs">
-                              {entries.length} distinct partner{entries.length !== 1 ? "s" : ""}
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap gap-1 pl-16">
-                            {entries.sort().map(([partner, count]) => (
-                              <span
-                                key={partner}
-                                className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                  count >= 2
-                                    ? "bg-yellow-200 text-yellow-800"
-                                    : "bg-green-100 text-green-700"
-                                }`}
-                              >
-                                {partner}: {count > 1 ? `${count}×` : "1×"}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
             )}
           </>
