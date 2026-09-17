@@ -48,7 +48,9 @@ function seedCounts(players, src) {
 const GAME_TRIES = 40;          // rerolls per game before accepting an over-cap one
 const OVER_CAP_PENALTY = 5000;  // dwarfs every soft penalty, so caps win ties
 const CAP_TIME = 8000;          // ms we will spend chasing a cap-clean schedule
-export const defaultGames = (n) => (n === 8 ? 3 : n === 7 ? 7 : 9);
+// 6 players → 12 games: the fair block is 9, and 12 is 9 plus a full extension, so
+// the schedule is optimal whether the night stops at 9 or runs to 12 (Rich 2026-09-17).
+export const defaultGames = (n) => (n === 8 ? 3 : n === 7 ? 7 : 12);
 
 // Greedy matching that prefers partners who haven't played together yet.
 // poolB given → cross-match A (men) with B (women); otherwise pair A with itself.
