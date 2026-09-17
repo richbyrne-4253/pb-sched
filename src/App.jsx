@@ -119,27 +119,36 @@ export default function App() {
     setEditingIdx(i);
     setEditVal(players[i]);
   };
+  // One rename path for both ways a name can change — typed in, or picked from the
+  // dropdown — so the couple rows and the M/F entry follow the name in either case.
+  const renameTo = (idx, rawName) => {
+    const newName = (rawName || "").trim();
+    if (!newName) return;
+    const oldName = players[idx];
+    if (oldName === newName) return;
+    const np = [...players];
+    np[idx] = newName;
+    setPlayers(np);
+    setPairs((prev) =>
+      prev.map((p) => ({
+        a: p.a === oldName ? newName : p.a,
+        b: p.b === oldName ? newName : p.b,
+      }))
+    );
+    setGenders((prev) => {
+      if (!(oldName in prev)) return prev;
+      const { [oldName]: g, ...rest } = prev;
+      return { ...rest, [newName]: g };
+    });
+  };
+
   const saveEdit = () => {
-    if (editVal.trim()) {
-      const oldName = players[editingIdx];
-      const newName = editVal.trim();
-      if (oldName !== newName) {
-        const np = [...players];
-        np[editingIdx] = newName;
-        setPlayers(np);
-        setPairs((prev) =>
-          prev.map((p) => ({
-            a: p.a === oldName ? newName : p.a,
-            b: p.b === oldName ? newName : p.b,
-          }))
-        );
-        setGenders((prev) => {
-          if (!(oldName in prev)) return prev;
-          const { [oldName]: g, ...rest } = prev;
-          return { ...rest, [newName]: g };
-        });
-      }
-    }
+    renameTo(editingIdx, editVal);
+    setEditingIdx(null);
+  };
+
+  const chooseName = (idx, name) => {
+    renameTo(idx, name);
     setEditingIdx(null);
   };
 
@@ -252,26 +261,57 @@ export default function App() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {players.map((p, i) => (
               <div key={i} className="flex flex-col gap-1">
-                <div className="flex items-stretch gap-1">
+                <div className="flex items-stretch gap-1 relative">
                   {editingIdx === i ? (
-                    <>
+                    <div className="relative flex-1">
                       <input
                         className="border-2 border-green-400 rounded-lg px-3 py-2 w-full text-sm font-medium focus:outline-none"
-                        list={`names-${i}`}
                         value={editVal}
                         onChange={(e) => setEditVal(e.target.value)}
                         onBlur={saveEdit}
-                        onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveEdit();
+                          if (e.key === "Escape") setEditingIdx(null);
+                        }}
                         placeholder="pick or type a name"
                         autoFocus
                       />
-                      {/* Suggestions only — the input stays free text, so anyone can be typed in. */}
-                      <datalist id={`names-${i}`}>
-                        {nameOptionsFor(p).map((n) => (
-                          <option key={n} value={n} />
-                        ))}
-                      </datalist>
-                    </>
+                      {/* A real list, not a <datalist>: browsers show nothing on tap for those, so
+                          the regulars were invisible (Rich 2026-09-17). Typing filters it, and any
+                          name can still be typed in free-hand. onMouseDown, not onClick — the
+                          input's onBlur would commit and unmount this before a click landed. */}
+                      {(() => {
+                        // Opening the box pre-fills the current name, so filtering on it would
+                        // show just that one name — the whole list must be there until you
+                        // actually type something different (Rich 2026-09-17).
+                        const typed = editVal.trim();
+                        const untouched = typed === "" || typed === p;
+                        const opts = untouched
+                          ? nameOptionsFor(p)
+                          : nameOptionsFor(p).filter((n) =>
+                              n.toLowerCase().startsWith(typed.toLowerCase())
+                            );
+                        if (!opts.length) return null;
+                        return (
+                          <ul className="absolute z-20 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto bg-white border-2 border-green-300 rounded-lg shadow-lg py-1">
+                            {opts.map((n) => (
+                              <li key={n}>
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    chooseName(i, n);
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 hover:bg-green-100"
+                                >
+                                  {n}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        );
+                      })()}
+                    </div>
                   ) : (
                     <button
                       onClick={() => startEdit(i)}
