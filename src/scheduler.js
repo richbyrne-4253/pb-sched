@@ -1,7 +1,8 @@
 // Pure pickleball scheduling engine — no React, fully unit-testable.
 //
-// Roster size drives court count: 8 players → 2 courts (everyone plays every
-// game), 6 or 7 → 1 court (the rest sit out). Modes:
+// Roster size suggests the court count — 12 players → 3 courts, 8 to 11 → 2, fewer → 1 —
+// and the caller may pick any count the roster can fill (4 players a court); the rest sit
+// out and rotate in. Modes:
 //   - coed: every team is 1 M + 1 F
 //   - same-gender (non-coed, 8 players, 4M+4F): men on one court, women on the other
 //   - open: no gender constraint
@@ -19,12 +20,18 @@ export function shuffle(arr) {
 
 export const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
-export const courtsFor = (n) => (n === 8 ? 2 : 1);
+export const MAX_COURTS = 3;
+export const courtsFor = (n) => (n >= 12 ? 3 : n >= 8 ? 2 : 1);
+// Every court count this roster can fill, e.g. 8 players → [1, 2].
+export const courtChoices = (n) =>
+  Array.from({ length: Math.min(MAX_COURTS, Math.floor(n / 4)) }, (_, i) => i + 1);
 
 // The game count at which a roster's schedule is already as level as the
 // arithmetic allows — its natural stopping point.
 //   6 players, 1 court  → 9 games: every pair partners once, 3 pairs twice, everyone sits 3.
 //   8 players, 2 courts → 7 games: every pair partners exactly once and opposes exactly twice.
+//   9 players, 2 courts → 9 games: every pair partners exactly once, everyone sits once.
+//  10 players, 2 courts → 9 games: nobody repeats a partner (36 of the 45 pairs).
 // Past that point a schedule built in one pass is fair only at the finish line: it
 // reaches the same end state, but stop it early and you are mid-pattern, with some
 // pairs never having partnered. Building the block first and extending from it is
@@ -33,6 +40,7 @@ export const courtsFor = (n) => (n === 8 ? 2 : 1);
 export function fairBlock(n, courts) {
   if (courts === 1 && n === 6) return 9;
   if (courts === 2 && n === 8) return 7;
+  if (courts === 2 && (n === 9 || n === 10)) return 9;
   return null;
 }
 
@@ -169,10 +177,24 @@ export function chooseSitters(players, genders, coed, courts, sitCounts, lastSit
   if (sitPerGame <= 0) return [];
 
   const pickLowest = (pool, k) => {
-    const elig = pool.filter((p) => !lastSitters.has(p));
-    if (elig.length < k) return null;
-    const sorted = shuffle(elig).sort((a, b) => sitCounts[a] - sitCounts[b]);
-    return sorted.slice(0, k);
+    if (k <= 0) return [];
+    // Fewer than half sit: nobody sits two games running, and the fewest-sat go first.
+    if (k * 2 < pool.length) {
+      const elig = pool.filter((p) => !lastSitters.has(p));
+      if (elig.length < k) return null;
+      const sorted = shuffle(elig).sort((a, b) => sitCounts[a] - sitCounts[b]);
+      return sorted.slice(0, k);
+    }
+    // Half or more sit (8 players on one court): "never twice running" would lock the same
+    // four together all night, playing and sitting as a block. So it becomes a lean rather
+    // than a rule — a little randomness lets people cross between the groups, and the search
+    // above keeps whichever night came out with the sits level and the partners mixed.
+    const weight = (p) => sitCounts[p] + (lastSitters.has(p) ? 0.75 : 0) + Math.random() * 1.5;
+    return pool
+      .map((p) => [p, weight(p)])
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, k)
+      .map(([p]) => p);
   };
 
   if (coed) {
@@ -278,7 +300,8 @@ export function scoreSchedule({ schedule, partner, opponent, sitCounts }, player
 
 export function generateSchedule(players, opts = {}) {
   const { genders = {}, numGames = 3, coed = false, fixedPairs = [] } = opts;
-  const courts = courtsFor(players.length);
+  // The caller's court count wins when the roster can fill it; otherwise the usual one.
+  const courts = courtChoices(players.length).includes(opts.courts) ? opts.courts : courtsFor(players.length);
   const males = players.filter((p) => genders[p] === "M").length;
   const females = players.filter((p) => genders[p] === "F").length;
   const segregate = !coed && courts === 2 && males === 4 && females === 4;

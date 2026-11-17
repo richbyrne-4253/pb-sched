@@ -3,6 +3,7 @@ import { fetchNextGame, prefillFrom } from "./nextGame.js";
 import { loadPostKey, buildPostPayload, postSchedule } from "./postSchedule.js";
 import {
   courtsFor,
+  courtChoices,
   defaultGames,
   generateSchedule,
   buildPlayerGames,
@@ -15,7 +16,7 @@ import {
 } from "./scheduler.js";
 
 // 6 players on one court is the usual game: two sit out each round, and 12 games
-// fills a long session (Rich 2026-09-17). Add players for the 8-player, 2-court case.
+// fills a long session (Rich 2026-09-17). Add players for more courts: up to 12 on 3.
 const DEFAULT_PLAYERS = ["Rich", "Tom", "Slater", "Kiran", "Mayank", "Martin"];
 const DEFAULT_GENDERS = {
   Rich: "M", Tom: "M", Slater: "M", Kiran: "M", Mayank: "M", Martin: "M",
@@ -35,7 +36,7 @@ const WOMEN_NAMES = ["Barbara", "Carol", "Harriet", "Julie", "Sweta"].sort((a, b
 const EXTRA_PLAYERS = ["Charles", "Solomon"];
 
 const MIN_PLAYERS = 6;
-const MAX_PLAYERS = 8;
+const MAX_PLAYERS = 12;
 const MAX_PAIRS = 4;
 
 const EMPTY_PAIRS = Array.from({ length: MAX_PAIRS }, () => ({ a: "", b: "" }));
@@ -62,7 +63,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("schedule");
   // What the club calls each court ("3", "4"); blank falls back to 1, 2.
-  const [courtNames, setCourtNames] = useState(["", ""]);
+  const [courtNames, setCourtNames] = useState(["", "", ""]);
   // Game clock: the schedule shows when each game starts.
   // On by default, and remembered on this device, so a refresh never drops the times.
   const [saved] = useState(() => {
@@ -85,7 +86,11 @@ export default function App() {
     }
   }, [timed, warmupMin, gameMin, sessionMin]);
 
-  const courts = courtsFor(players.length);
+  // Courts: the roster's usual count unless one was picked, and a pick the roster can no
+  // longer fill (players removed) falls back to the usual one.
+  const [courtPick, setCourtPick] = useState(null);
+  const courtOptions = courtChoices(players.length);
+  const courts = courtOptions.includes(courtPick) ? courtPick : courtsFor(players.length);
   const sitPerGame = players.length - courts * 4;
 
   const usedInPairs = useMemo(() => {
@@ -148,12 +153,12 @@ export default function App() {
     setRunning(true);
     setResult(undefined);
     setTimeout(() => {
-      const res = generateSchedule(players, { genders, numGames, coed, fixedPairs: activePairs });
+      const res = generateSchedule(players, { genders, numGames, coed, fixedPairs: activePairs, courts });
       setResult(res);
       setRunning(false);
       setActiveTab("schedule");
     }, 50);
-  }, [players, genders, numGames, coed, activePairs]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [players, genders, numGames, coed, activePairs, courts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEdit = (i) => {
     touchedRef.current = true;
@@ -279,7 +284,10 @@ export default function App() {
         setPlayers(fill.players);
         setGenders(fill.genders);
         setNumGames(defaultGames(fill.players.length));
-        setCourtNames([fill.courtNames[0] || "", fill.courtNames[1] || ""]);
+        setCourtNames([fill.courtNames[0] || "", fill.courtNames[1] || "", fill.courtNames[2] || ""]);
+        // A booking with several courts picks that many. One court is left on automatic, so
+        // adding a seventh and eighth player still opens the second court.
+        if (fill.courtNames.length > 1) setCourtPick(fill.courtNames.length);
         setStartTime(fill.startTime);
         setPrefill(fill);
         setNextSlot({ date: game.date, startMin: game.startMin, club: game.club || "", start: fill.startTime, label: fill.label });
@@ -358,7 +366,13 @@ export default function App() {
   const [printFontPt, setPrintFontPt] = useState(PRINT_MIN_PT);
   const subtitle =
     `${players.length} players · ${numGames} games · ${courts} court${courts > 1 ? "s" : ""}` +
-    (coed ? " · coed (mixed teams)" : courts === 2 ? " · same-gender courts" : "") +
+    (coed
+      ? " · coed (mixed teams)"
+      : courts === 2 &&
+        players.filter((p) => genders[p] === "M").length === 4 &&
+        players.filter((p) => genders[p] === "F").length === 4
+      ? " · same-gender courts"
+      : "") +
     (clock ? ` · ${warmupMin} min warm-up, ${gameMin} min games, court until ${clock.sessionEnd}` : "");
 
   const TeamCell = (team) => (
@@ -598,9 +612,9 @@ export default function App() {
           </div>
           <p className="text-xs text-gray-400 mt-3">
             {players.length} players →{" "}
-            {courts === 2
-              ? "2 courts, everyone plays every game"
-              : `1 court, ${sitPerGame} sit out each game`}
+            {sitPerGame === 0
+              ? `${courts} court${courts > 1 ? "s" : ""}, everyone plays every game`
+              : `${courts} court${courts > 1 ? "s" : ""}, ${sitPerGame} sit${sitPerGame === 1 ? "s" : ""} out each game`}
             . M/F is used for coed teams and same-gender courts.
           </p>
         </div>
@@ -634,6 +648,32 @@ export default function App() {
                 Coed — every team is 1 M + 1 F
               </span>
             </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className="text-sm font-medium text-gray-700 mr-1">Courts</span>
+            {[1, 2, 3].map((c) => {
+              const can = courtOptions.includes(c);
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  disabled={!can}
+                  onClick={() => setCourtPick(c)}
+                  title={can ? "" : `Needs at least ${c * 4} players`}
+                  className={`w-9 h-9 rounded-full text-sm font-semibold border transition-colors ${
+                    courts === c
+                      ? "bg-green-700 text-white border-green-700"
+                      : can
+                      ? "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"
+                      : "bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed"
+                  }`}
+                >
+                  {c}
+                </button>
+              );
+            })}
+            <span className="text-xs text-gray-400">4 play on each court; everyone else sits and rotates in</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 mb-3">
