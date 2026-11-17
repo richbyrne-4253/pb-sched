@@ -61,6 +61,9 @@ const CAP_TIME = 8000;          // ms we will spend chasing a cap-clean schedule
 // eslint-disable-next-line no-unused-vars
 export const defaultGames = (n) => 9;
 
+const permutations = (arr) =>
+  arr.length <= 1 ? [arr] : arr.flatMap((x, i) => permutations([...arr.slice(0, i), ...arr.slice(i + 1)]).map((r) => [x, ...r]));
+
 // Greedy matching that prefers partners who haven't played together yet.
 // poolB given → cross-match A (men) with B (women); otherwise pair A with itself.
 function greedyPairs(poolA, poolB, partner) {
@@ -223,6 +226,14 @@ export function buildOnce(players, genders, numGames, coed, segregate, fixedPair
   });
   let lastSitters = new Set((seed && seed.lastSitters) || []);
   const gameOffset = (seed && seed.schedule && seed.schedule.length) || 0;
+  // Games each player has had on each court so far (carried in from a frozen earlier stage).
+  const courtSeen = {};
+  players.forEach((p) => {
+    courtSeen[p] = Array(courts).fill(0);
+  });
+  ((seed && seed.schedule) || []).forEach((g) =>
+    g.courts.forEach((ct, ci) => ct.forEach((t) => t.forEach((p) => courtSeen[p] && courtSeen[p][ci]++)))
+  );
 
   const locked = new Set(fixedPairs.map(([a, b]) => pairKey(a, b)));
   // A game is "clean" when no pair in it exceeds the cap; fixed couples exempt.
@@ -249,6 +260,28 @@ export function buildOnce(players, genders, numGames, coed, segregate, fixedPair
       if (clean(built)) break;
     }
     if (!courtList) return null;
+
+    // Which match goes on which court is free: take the order that keeps everyone's time on
+    // each court most level so far (levelCourts() below finishes the job).
+    if (courtList.length > 1) {
+      let bestOrder = null;
+      let bestCost = Infinity;
+      for (const order of permutations(courtList.map((_, i) => i))) {
+        let cost = 0;
+        order.forEach((mi, ci) =>
+          courtList[mi].forEach((t) => t.forEach((p) => {
+            cost += 2 * courtSeen[p][ci] + 1; // growth of the sum of squares
+          }))
+        );
+        cost += Math.random() * 0.01; // break ties differently each run
+        if (cost < bestCost) {
+          bestCost = cost;
+          bestOrder = order;
+        }
+      }
+      courtList = bestOrder.map((mi) => courtList[mi]);
+      courtList.forEach((ct, ci) => ct.forEach((t) => t.forEach((p) => courtSeen[p][ci]++)));
+    }
 
     courtList.forEach(([t1, t2]) => {
       partner[t1[0]][t1[1]] = (partner[t1[0]][t1[1]] || 0) + 1;
@@ -295,6 +328,9 @@ export function scoreSchedule({ schedule, partner, opponent, sitCounts }, player
   if (Math.max(...gp) - Math.min(...gp) > 1) score += 100;
   const sc = players.map((p) => sitCounts[p]);
   if (Math.max(...sc) - Math.min(...sc) > 1) score += 60;
+  // Uneven time on the courts, beyond what the arithmetic forces (an odd number of games on
+  // two courts can only split 5/4). Weighted below a partner repeat, alongside opponents.
+  if (schedule.length && schedule[0].courts.length > 1) score += courtExcess(schedule, players) * 3;
   return score;
 }
 
@@ -363,10 +399,109 @@ export function generateSchedule(players, opts = {}) {
     const first = searchBest(block, null, block, STAGE_TIME);
     if (first) {
       const staged = searchBest(numGames - block, first, numGames, STAGE_TIME);
-      if (staged) return staged;
+      if (staged) return levelCourts(staged, players);
     }
   }
-  return searchBest(numGames, null, numGames, TIME);
+  return levelCourts(searchBest(numGames, null, numGames, TIME), players);
+}
+
+// ---- Even time on each court (Rich 2026-11-17) ----
+// The search above decides who plays with and against whom; which of those matches goes on
+// which court is free. Left alone it came out lopsided — one player on court 4 for seven of ten
+// games, another for three. This only reorders the matches inside each game, so partners,
+// opponents and sitters are untouched.
+
+// { player: [games on court 0, games on court 1, …] }
+export function courtCounts(schedule, players, upto = schedule.length) {
+  const courts = Math.max(1, ...schedule.map((g) => g.courts.length));
+  const out = {};
+  players.forEach((p) => {
+    out[p] = Array(courts).fill(0);
+  });
+  schedule.slice(0, upto).forEach((g) =>
+    g.courts.forEach((ct, ci) => ct.forEach((t) => t.forEach((p) => out[p] && out[p][ci]++)))
+  );
+  return out;
+}
+
+// Court imbalance above the unavoidable minimum: a player with 9 games on 2 courts can do no
+// better than 5/4, and that costs nothing here.
+function courtExcess(schedule, players) {
+  const counts = courtCounts(schedule, players);
+  let cost = 0;
+  for (const p of players) {
+    const n = counts[p].length;
+    const total = counts[p].reduce((a, b) => a + b, 0);
+    const lo = Math.floor(total / n);
+    const extra = total - lo * n; // this many courts get lo + 1
+    const share = total / n;
+    const floorCost = extra * (lo + 1 - share) ** 2 + (n - extra) * (lo - share) ** 2;
+    cost += counts[p].reduce((a, c) => a + (c - share) ** 2, 0) - floorCost;
+  }
+  return Math.round(cost * 1000) / 1000;
+}
+
+// How far from level: each player's count on each court against an equal share of their games.
+function courtImbalance(schedule, players) {
+  const counts = courtCounts(schedule, players);
+  let cost = 0;
+  for (const p of players) {
+    const share = counts[p].reduce((a, b) => a + b, 0) / counts[p].length;
+    for (const c of counts[p]) cost += (c - share) ** 2;
+  }
+  return cost;
+}
+
+// Reorder each game's matches across the courts until nobody's share can be improved by moving
+// one game. Greedy passes from several shuffled starts; the best result wins. A schedule on one
+// court, or none at all, is handed back as it came.
+export function levelCourts(result, players) {
+  if (!result || !result.schedule || !result.schedule.length) return result;
+  const courts = result.schedule[0].courts.length;
+  if (courts < 2) return result;
+  const orders = permutations(Array.from({ length: courts }, (_, i) => i));
+  const arrange = (g, order) => ({ ...g, courts: order.map((i) => g.courts[i]) });
+  let best = result.schedule;
+  let bestCost = courtImbalance(best, players);
+  // Few enough arrangements (two courts, up to 14 games): try every one, with game 1 pinned
+  // since swapping every game at once changes nothing but the court labels.
+  const G = result.schedule.length;
+  if (orders.length ** (G - 1) <= 10000) {
+    const pick = Array(G).fill(0);
+    for (let n = 0, total = orders.length ** (G - 1); n < total; n++) {
+      for (let k = 1, r = n; k < G; k++, r = Math.floor(r / orders.length)) pick[k] = r % orders.length;
+      const sched = result.schedule.map((g, j) => (pick[j] ? arrange(g, orders[pick[j]]) : g));
+      const c = courtImbalance(sched, players);
+      if (c < bestCost - 1e-9) {
+        best = sched;
+        bestCost = c;
+      }
+    }
+    return { ...result, schedule: best };
+  }
+  for (let start = 0; start < 12 && bestCost > 0; start++) {
+    let sched = start === 0 ? result.schedule : result.schedule.map((g) => arrange(g, orders[Math.floor(Math.random() * orders.length)]));
+    let cost = courtImbalance(sched, players);
+    for (let pass = 0, improved = true; improved && pass < 50; pass++) {
+      improved = false;
+      for (let gi = 0; gi < sched.length; gi++) {
+        for (const order of orders) {
+          const trial = sched.map((g, j) => (j === gi ? arrange(g, order) : g));
+          const c = courtImbalance(trial, players);
+          if (c < cost - 1e-9) {
+            sched = trial;
+            cost = c;
+            improved = true;
+          }
+        }
+      }
+    }
+    if (cost < bestCost - 1e-9) {
+      best = sched;
+      bestCost = cost;
+    }
+  }
+  return { ...result, schedule: best };
 }
 
 // Fairness of the first `upto` games, for showing that a staged schedule is fair at

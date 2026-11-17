@@ -9,6 +9,7 @@ import {
   buildPlayerGames,
   fairBlock,
   analyzeSchedule,
+  courtCounts,
   gameClock,
   DEFAULT_WARMUP_MIN,
   DEFAULT_GAME_MIN,
@@ -1011,6 +1012,45 @@ export default function App() {
 
               {activeTab === "verification" && (
                 <div className="grid gap-3">
+                  {courts > 1 &&
+                    (() => {
+                      const cc = courtCounts(result.schedule, players);
+                      return (
+                        <div className="bg-white rounded-2xl shadow p-4">
+                          <h3 className="font-bold text-gray-700 mb-1">🏟️ Games on each court</h3>
+                          <p className="text-xs text-gray-400 mb-3">
+                            Matches are placed so everyone gets as near an equal share of each court as the
+                            game count allows.
+                          </p>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-green-700 text-white">
+                                  <th className="p-2 text-left">Player</th>
+                                  {Array.from({ length: courts }, (_, ci) => (
+                                    <th key={ci} className="p-2 text-center">
+                                      Court {courtLabel(ci)}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {players.map((p, i) => (
+                                  <tr key={p} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
+                                    <td className={`p-2 font-bold ${playerColors[p]}`}>{p}</td>
+                                    {cc[p].map((n, ci) => (
+                                      <td key={ci} className="p-2 text-center">
+                                        {n}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   {(() => {
                     // A staged schedule is built as an optimal block plus an extension, so
                     // show it judged at BOTH stopping points: quit at the block and it is
