@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { fetchNextGame, prefillFrom } from "./nextGame.js";
+import { loadPostKey, buildPostPayload, postSchedule } from "./postSchedule.js";
 import {
   courtsFor,
   defaultGames,
@@ -259,6 +260,7 @@ export default function App() {
         setCourtNames([fill.courtNames[0] || "", fill.courtNames[1] || ""]);
         setStartTime(fill.startTime);
         setPrefill(fill);
+        setNextSlot({ date: game.date, startMin: game.startMin, club: game.club || "", start: fill.startTime, label: fill.label });
       })
       .catch(() => {}); // offline or nothing published: the usual defaults stay
     return () => {
@@ -266,15 +268,49 @@ export default function App() {
     };
   }, []);
 
+  // Post-to-group buttons exist only on a device that opened the setup link (postSchedule.js).
+  const [postKey] = useState(loadPostKey);
+  const [posting, setPosting] = useState(false);
+  const [postMsg, setPostMsg] = useState(null); // { ok, text }
+  const [nextSlot, setNextSlot] = useState(null); // the booking the form was filled from
+
   const courtLabel = (ci) => (courtNames[ci] || "").trim() || String(ci + 1);
   // One court needs no Court column unless it has been given a name.
   const showCourtCol = courts > 1 || !!(courtNames[0] || "").trim();
 
   const clockGames = result ? result.schedule.length : numGames;
   const clock = timed ? gameClock(startTime, warmupMin, gameMin, clockGames) : null;
+  const startLabel = (() => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(startTime || "");
+    if (!m) return "";
+    const h = +m[1];
+    return `${((h + 11) % 12) + 1}:${m[2]} ${h < 12 ? "AM" : "PM"}`;
+  })();
   const clockLength = clock
     ? `${Math.floor(clock.totalMin / 60)}h ${String(Math.round(clock.totalMin % 60)).padStart(2, "0")}m`
     : "";
+
+  const postTo = async (group, label) => {
+    if (!result || posting) return;
+    if (!window.confirm(`Post this schedule to the ${label} group as Rally?`)) return;
+    // Tie the post to the booking only while the form still describes it (same start time).
+    const slot = nextSlot && nextSlot.start === startTime ? nextSlot : null;
+    const when = slot ? slot.label : clock ? `today, ${startLabel} start` : "today";
+    const payload = buildPostPayload({
+      group,
+      schedule: result.schedule,
+      courtNames: Array.from({ length: courts }, (_, ci) => (courtNames[ci] || "").trim()),
+      clock,
+      warmupMin,
+      when,
+      slot: slot ? { date: slot.date, startMin: slot.startMin, club: slot.club } : null,
+    });
+    setPosting(true);
+    setPostMsg({ ok: true, text: "Sending…" });
+    const out = await postSchedule(postKey, payload, { onStatus: (text) => setPostMsg({ ok: true, text }) });
+    setPostMsg({ ok: out.ok, text: out.message });
+    setPosting(false);
+  };
 
   const playsPerPlayer = numGames - Math.round((sitPerGame * numGames) / players.length);
 
@@ -768,6 +804,29 @@ export default function App() {
                 🖨️ Print
               </button>
             </div>
+
+            {postKey && (
+              <div className="no-print flex flex-wrap gap-2 mb-4 items-center">
+                <span className="text-sm font-medium text-gray-600">Post as Rally to</span>
+                {[["mens", "Men's"], ["coed", "Coed"]].map(([group, label]) => (
+                  <button
+                    key={group}
+                    onClick={() => postTo(group, label)}
+                    disabled={posting}
+                    className={`px-4 py-2 rounded-full text-sm font-medium shadow ${
+                      posting ? "bg-gray-100 text-gray-400" : "bg-green-700 text-white hover:bg-green-800"
+                    }`}
+                  >
+                    📣 {label}
+                  </button>
+                ))}
+                {postMsg && (
+                  <span className={`text-sm ${postMsg.ok ? "text-green-700" : "text-red-600 font-semibold"}`}>
+                    {postMsg.text}
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Everything from here down is what goes on paper. */}
             <div
