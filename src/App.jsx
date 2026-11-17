@@ -32,6 +32,8 @@ const WOMEN_NAMES = ["Barbara", "Carol", "Harriet", "Julie", "Sweta"].sort((a, b
   a.localeCompare(b)
 );
 
+const EXTRA_PLAYERS = ["Charles", "Solomon"];
+
 const MIN_PLAYERS = 6;
 const MAX_PLAYERS = 8;
 const MAX_PAIRS = 4;
@@ -61,12 +63,27 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("schedule");
   // What the club calls each court ("3", "4"); blank falls back to 1, 2.
   const [courtNames, setCourtNames] = useState(["", ""]);
-  // Game clock: off until asked for, then the schedule shows when each game starts.
-  const [timed, setTimed] = useState(false);
+  // Game clock: the schedule shows when each game starts.
+  // On by default, and remembered on this device, so a refresh never drops the times.
+  const [saved] = useState(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem("pbsched.clock") || "{}") || {};
+    } catch {
+      return {};
+    }
+  });
+  const [timed, setTimed] = useState(saved.timed !== false);
   const [startTime, setStartTime] = useState("16:00");
-  const [warmupMin, setWarmupMin] = useState(DEFAULT_WARMUP_MIN);
-  const [gameMin, setGameMin] = useState(DEFAULT_GAME_MIN);
-  const [sessionMin, setSessionMin] = useState(DEFAULT_SESSION_MIN);
+  const [warmupMin, setWarmupMin] = useState(saved.warmupMin ?? DEFAULT_WARMUP_MIN);
+  const [gameMin, setGameMin] = useState(saved.gameMin ?? DEFAULT_GAME_MIN);
+  const [sessionMin, setSessionMin] = useState(saved.sessionMin ?? DEFAULT_SESSION_MIN);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("pbsched.clock", JSON.stringify({ timed, warmupMin, gameMin, sessionMin }));
+    } catch {
+      // private mode or blocked storage: the settings just don't persist
+    }
+  }, [timed, warmupMin, gameMin, sessionMin]);
 
   const courts = courtsFor(players.length);
   const sitPerGame = players.length - courts * 4;
@@ -179,12 +196,15 @@ export default function App() {
   const addPlayer = () => {
     if (players.length >= MAX_PLAYERS) return;
     touchedRef.current = true;
+    // The usual seventh and eighth, then numbered placeholders (Rich 2026-11-17).
     let n = players.length + 1;
-    let name = `Player ${n}`;
+    let name = EXTRA_PLAYERS.find((x) => !players.includes(x)) || `Player ${n}`;
     while (players.includes(name)) name = `Player ${++n}`;
     const next = [...players, name];
     setPlayers(next);
     setNumGames(defaultGames(next.length));
+    const known = MEN_NAMES.includes(name) || EXTRA_PLAYERS.includes(name) ? "M" : WOMEN_NAMES.includes(name) ? "F" : null;
+    if (known) setGenders((prev) => ({ ...prev, [name]: known }));
   };
 
   const removePlayer = (i) => {
