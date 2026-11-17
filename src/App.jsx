@@ -56,6 +56,8 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("schedule");
+  // What the club calls each court ("3", "4"); blank falls back to 1, 2.
+  const [courtNames, setCourtNames] = useState(["", ""]);
   // Game clock: off until asked for, then the schedule shows when each game ends.
   const [timed, setTimed] = useState(false);
   const [startTime, setStartTime] = useState("16:00");
@@ -237,6 +239,10 @@ export default function App() {
     });
   };
 
+  const courtLabel = (ci) => (courtNames[ci] || "").trim() || String(ci + 1);
+  // One court needs no Court column unless it has been given a name.
+  const showCourtCol = courts > 1 || !!(courtNames[0] || "").trim();
+
   const clockGames = result ? result.schedule.length : numGames;
   const clock = timed ? gameClock(startTime, warmupMin, gameMin, clockGames) : null;
   const clockLength = clock
@@ -285,7 +291,7 @@ export default function App() {
       else hi = mid;
     }
     setPrintFontPt(lo);
-  }, [result, players, courts, sitPerGame, timed, startTime, warmupMin, gameMin]);
+  }, [result, players, courts, sitPerGame, timed, startTime, warmupMin, gameMin, courtNames]);
 
   const scheduleTable = result ? (
     <table className="sched-table w-full text-lg sm:text-2xl">
@@ -293,7 +299,7 @@ export default function App() {
         <tr className="bg-green-700 text-white">
           <th className="p-3 text-center w-12">Game</th>
           {clock && <th className="p-3 text-center w-20">Ends</th>}
-          {courts > 1 && <th className="p-3 text-left w-16">Court</th>}
+          {showCourtCol && <th className="p-3 text-left w-16">Court</th>}
           <th className="p-3 text-left">Team 1</th>
           <th className="p-3 text-center w-8">vs</th>
           <th className="p-3 text-left">Team 2</th>
@@ -332,8 +338,8 @@ export default function App() {
                   {clock.ends[gi]}
                 </td>
               )}
-              {courts > 1 && (
-                <td className="p-3 text-gray-500 font-medium">{ci + 1}</td>
+              {showCourtCol && (
+                <td className="p-3 text-gray-500 font-medium whitespace-nowrap">{courtLabel(ci)}</td>
               )}
               <td className="p-3">{TeamCell(ct[0])}</td>
               <td className="p-3 text-center text-gray-400 font-bold">vs</td>
@@ -516,6 +522,31 @@ export default function App() {
                 Coed — every team is 1 M + 1 F
               </span>
             </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <span className="text-sm font-medium text-gray-700">
+              Court name{courts > 1 ? "s" : ""}
+            </span>
+            {Array.from({ length: courts }, (_, ci) => (
+              <input
+                key={ci}
+                type="text"
+                maxLength={12}
+                value={courtNames[ci] || ""}
+                placeholder={String(ci + 1)}
+                aria-label={`Name of court ${ci + 1}`}
+                onChange={(e) =>
+                  setCourtNames((prev) => {
+                    const next = [...prev];
+                    next[ci] = e.target.value;
+                    return next;
+                  })
+                }
+                className="border rounded-lg px-2 py-1 text-sm w-20 bg-white"
+              />
+            ))}
+            <span className="text-xs text-gray-400">e.g. 3 and 4 — shown in the Court column</span>
           </div>
 
           <div className="mb-3">
