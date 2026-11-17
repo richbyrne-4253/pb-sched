@@ -37,9 +37,10 @@ export function buildPostPayload({ group, schedule, courtNames, clock, warmupMin
     group,
     when: when || "",
     courtNames: courtNames || [],
-    warmup: clock && Number(warmupMin) > 0 ? { min: Number(warmupMin), ends: clock.warmupEnds } : null,
+    warmup: clock && Number(warmupMin) > 0 ? { min: Number(warmupMin), starts: clock.sessionStart } : null,
+    courtEnds: clock ? clock.sessionEnd : "",
     slot: slot || null,
-    games: schedule.map((g, i) => ({ courts: g.courts, sitting: g.sitting || [], ends: clock ? clock.ends[i] : "" })),
+    games: schedule.map((g, i) => ({ courts: g.courts, sitting: g.sitting || [], starts: clock ? clock.starts[i] : "", minutes: clock ? clock.minutes[i] : null })),
   };
 }
 

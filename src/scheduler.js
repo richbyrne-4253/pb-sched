@@ -431,11 +431,13 @@ export function buildPlayerGames(schedule) {
 }
 
 // ---- Game clock (Rich 2026-11-17) ----
-// A session is a warm-up followed by games of a set length; the schedule prints the time each
-// game should END, so both courts stop and rotate together. 2 min warm-up + 9 games of 13 min
-// is a 2-hour court to the minute (119 min).
+// A session is a warm-up followed by games of a set length. The schedule prints the time each game
+// STARTS — game 1 right after the warm-up — so every court switches together. With a 4:00 court,
+// a 2 min warm-up and 12 min games: 4:02, 4:14 … game 9 at 5:38, and a tenth at 5:50 that only
+// gets the 10 minutes left before the court time is up at 6:00.
 export const DEFAULT_WARMUP_MIN = 2;
-export const DEFAULT_GAME_MIN = 13;
+export const DEFAULT_GAME_MIN = 12;
+export const DEFAULT_SESSION_MIN = 120;
 
 // Minutes after midnight → "4:15" (12-hour, no AM/PM: a court session never spans both).
 export function clockLabel(totalMin) {
@@ -444,15 +446,33 @@ export function clockLabel(totalMin) {
   return `${((h + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")}`;
 }
 
-// start "16:00" → { warmupEnds, ends: [label per game], totalMin }, or null when the inputs
-// don't describe a real clock (blank start, zero-length games).
-export function gameClock(start, warmupMin, gameMin, numGames) {
+// start "16:00" → {
+//   sessionStart, sessionEnd,          labels for the court time
+//   starts: [label per game],          when each game begins
+//   minutes: [per game],               its length; the last one that fits may be cut short, and a
+//                                      game that would begin at or after the end gets 0
+//   fit,                               how many games begin before the court time is up
+// } or null when the inputs don't describe a real clock (blank start, zero-length games).
+export function gameClock(start, warmupMin, gameMin, numGames, sessionMin = DEFAULT_SESSION_MIN) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(start || ""));
   const w = Number(warmupMin);
   const g = Number(gameMin);
+  const len = Number(sessionMin);
   if (!m || !Number.isFinite(w) || w < 0 || !Number.isFinite(g) || g <= 0 || !(numGames > 0)) return null;
+  if (!Number.isFinite(len) || len <= w) return null;
   const t0 = +m[1] * 60 + +m[2];
-  const ends = [];
-  for (let i = 1; i <= numGames; i++) ends.push(clockLabel(t0 + w + i * g));
-  return { warmupEnds: clockLabel(t0 + w), ends, totalMin: w + numGames * g };
+  const starts = [];
+  const minutes = [];
+  for (let i = 0; i < numGames; i++) {
+    const at = w + i * g; // minutes into the session
+    starts.push(clockLabel(t0 + at));
+    minutes.push(Math.max(0, Math.round(Math.min(g, len - at))));
+  }
+  return {
+    sessionStart: clockLabel(t0),
+    sessionEnd: clockLabel(t0 + len),
+    starts,
+    minutes,
+    fit: Math.ceil((len - w) / g),
+  };
 }
