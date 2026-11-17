@@ -1,4 +1,5 @@
-import { useState, useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { fetchNextGame, prefillFrom } from "./nextGame.js";
 import {
   courtsFor,
   defaultGames,
@@ -135,6 +136,7 @@ export default function App() {
   }, [players, genders, numGames, coed, activePairs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startEdit = (i) => {
+    touchedRef.current = true;
     setEditingIdx(i);
     setEditVal(players[i]);
   };
@@ -173,6 +175,7 @@ export default function App() {
 
   const addPlayer = () => {
     if (players.length >= MAX_PLAYERS) return;
+    touchedRef.current = true;
     let n = players.length + 1;
     let name = `Player ${n}`;
     while (players.includes(name)) name = `Player ${++n}`;
@@ -183,6 +186,7 @@ export default function App() {
 
   const removePlayer = (i) => {
     if (players.length <= MIN_PLAYERS) return;
+    touchedRef.current = true;
     const name = players[i];
     const next = players.filter((_, j) => j !== i);
     setPlayers(next);
@@ -238,6 +242,29 @@ export default function App() {
       return usedRow === rowIdx;
     });
   };
+
+  // On open, fill the roster, court names and start time from the next game on the books. Only
+  // while the form is still untouched: once a name has been edited, a late answer changes nothing.
+  const [prefill, setPrefill] = useState(null);
+  const touchedRef = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    fetchNextGame()
+      .then((game) => {
+        const fill = prefillFrom(game, { min: MIN_PLAYERS, max: MAX_PLAYERS, women: WOMEN_NAMES });
+        if (!alive || !fill || touchedRef.current) return;
+        setPlayers(fill.players);
+        setGenders(fill.genders);
+        setNumGames(defaultGames(fill.players.length));
+        setCourtNames([fill.courtNames[0] || "", fill.courtNames[1] || ""]);
+        setStartTime(fill.startTime);
+        setPrefill(fill);
+      })
+      .catch(() => {}); // offline or nothing published: the usual defaults stay
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const courtLabel = (ci) => (courtNames[ci] || "").trim() || String(ci + 1);
   // One court needs no Court column unless it has been given a name.
@@ -372,6 +399,19 @@ export default function App() {
           <h1 className="text-3xl font-bold text-green-800">🏓 PB1 Pickleball Scheduler</h1>
           <p className="text-gray-500 mt-1 text-sm">{subtitle}</p>
         </div>
+
+        {prefill && (
+          <div className="no-print bg-green-50 border border-green-200 text-green-800 text-sm rounded-2xl px-4 py-2 mb-4">
+            Filled in from the next booking: <span className="font-semibold">{prefill.label}</span>
+            {prefill.courtNames.filter(Boolean).length > 0 &&
+              ` · court ${prefill.courtNames.filter(Boolean).join(" and ")}`}
+            {prefill.dropped > 0 &&
+              ` · ${prefill.total} are on it, so the last ${prefill.dropped} did not fit`}
+            {prefill.padded > 0 &&
+              ` · only ${prefill.total} on it so far, so ${prefill.padded} placeholder${prefill.padded > 1 ? "s were" : " was"} added`}
+            . Edit anything below.
+          </div>
+        )}
 
         {/* Player Names */}
         <div className="bg-white rounded-2xl shadow p-4 mb-4 no-print">
