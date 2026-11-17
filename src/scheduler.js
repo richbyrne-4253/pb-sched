@@ -429,3 +429,30 @@ export function buildPlayerGames(schedule) {
   });
   return pg;
 }
+
+// ---- Game clock (Rich 2026-11-17) ----
+// A session is a warm-up followed by games of a set length; the schedule prints the time each
+// game should END, so both courts stop and rotate together. 2 min warm-up + 9 games of 13 min
+// is a 2-hour court to the minute (119 min).
+export const DEFAULT_WARMUP_MIN = 2;
+export const DEFAULT_GAME_MIN = 13;
+
+// Minutes after midnight → "4:15" (12-hour, no AM/PM: a court session never spans both).
+export function clockLabel(totalMin) {
+  const m = ((Math.round(totalMin) % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  return `${((h + 11) % 12) + 1}:${String(m % 60).padStart(2, "0")}`;
+}
+
+// start "16:00" → { warmupEnds, ends: [label per game], totalMin }, or null when the inputs
+// don't describe a real clock (blank start, zero-length games).
+export function gameClock(start, warmupMin, gameMin, numGames) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(start || ""));
+  const w = Number(warmupMin);
+  const g = Number(gameMin);
+  if (!m || !Number.isFinite(w) || w < 0 || !Number.isFinite(g) || g <= 0 || !(numGames > 0)) return null;
+  const t0 = +m[1] * 60 + +m[2];
+  const ends = [];
+  for (let i = 1; i <= numGames; i++) ends.push(clockLabel(t0 + w + i * g));
+  return { warmupEnds: clockLabel(t0 + w), ends, totalMin: w + numGames * g };
+}

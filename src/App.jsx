@@ -6,6 +6,9 @@ import {
   buildPlayerGames,
   fairBlock,
   analyzeSchedule,
+  gameClock,
+  DEFAULT_WARMUP_MIN,
+  DEFAULT_GAME_MIN,
 } from "./scheduler.js";
 
 // 6 players on one court is the usual game: two sit out each round, and 12 games
@@ -53,6 +56,11 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState("schedule");
+  // Game clock: off until asked for, then the schedule shows when each game ends.
+  const [timed, setTimed] = useState(false);
+  const [startTime, setStartTime] = useState("16:00");
+  const [warmupMin, setWarmupMin] = useState(DEFAULT_WARMUP_MIN);
+  const [gameMin, setGameMin] = useState(DEFAULT_GAME_MIN);
 
   const courts = courtsFor(players.length);
   const sitPerGame = players.length - courts * 4;
@@ -229,6 +237,12 @@ export default function App() {
     });
   };
 
+  const clockGames = result ? result.schedule.length : numGames;
+  const clock = timed ? gameClock(startTime, warmupMin, gameMin, clockGames) : null;
+  const clockLength = clock
+    ? `${Math.floor(clock.totalMin / 60)}h ${String(Math.round(clock.totalMin % 60)).padStart(2, "0")}m`
+    : "";
+
   const playsPerPlayer = numGames - Math.round((sitPerGame * numGames) / players.length);
 
   // The printed schedule has to land on ONE sheet, so the type is sized to the page
@@ -244,7 +258,8 @@ export default function App() {
   const [printFontPt, setPrintFontPt] = useState(PRINT_MIN_PT);
   const subtitle =
     `${players.length} players · ${numGames} games · ${courts} court${courts > 1 ? "s" : ""}` +
-    (coed ? " · coed (mixed teams)" : courts === 2 ? " · same-gender courts" : "");
+    (coed ? " · coed (mixed teams)" : courts === 2 ? " · same-gender courts" : "") +
+    (clock ? ` · ${warmupMin} min warm-up, ${gameMin} min games, done ${clock.ends[clock.ends.length - 1]}` : "");
 
   const TeamCell = (team) => (
     <>
@@ -270,13 +285,14 @@ export default function App() {
       else hi = mid;
     }
     setPrintFontPt(lo);
-  }, [result, players, courts, sitPerGame]);
+  }, [result, players, courts, sitPerGame, timed, startTime, warmupMin, gameMin]);
 
   const scheduleTable = result ? (
     <table className="sched-table w-full text-lg sm:text-2xl">
       <thead>
         <tr className="bg-green-700 text-white">
           <th className="p-3 text-center w-12">Game</th>
+          {clock && <th className="p-3 text-center w-20">Ends</th>}
           {courts > 1 && <th className="p-3 text-left w-16">Court</th>}
           <th className="p-3 text-left">Team 1</th>
           <th className="p-3 text-center w-8">vs</th>
@@ -285,6 +301,15 @@ export default function App() {
         </tr>
       </thead>
       <tbody>
+        {clock && Number(warmupMin) > 0 && (
+          <tr className="border-b bg-amber-50">
+            <td className="p-3 text-center text-amber-700">☀</td>
+            <td className="p-3 text-center font-bold text-amber-700">{clock.warmupEnds}</td>
+            <td colSpan={99} className="p-3 text-amber-800 font-medium">
+              Warm-up ({warmupMin} min)
+            </td>
+          </tr>
+        )}
         {result.schedule.map((g, gi) =>
           g.courts.map((ct, ci) => (
             <tr
@@ -297,6 +322,14 @@ export default function App() {
                   className="p-3 text-center font-bold text-green-700 align-top"
                 >
                   {g.game}
+                </td>
+              )}
+              {clock && ci === 0 && (
+                <td
+                  rowSpan={g.courts.length}
+                  className="p-3 text-center font-bold text-gray-700 align-top whitespace-nowrap"
+                >
+                  {clock.ends[gi]}
                 </td>
               )}
               {courts > 1 && (
@@ -483,6 +516,63 @@ export default function App() {
                 Coed — every team is 1 M + 1 F
               </span>
             </label>
+          </div>
+
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => setTimed((t) => !t)}
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                timed
+                  ? "bg-green-700 text-white border-green-700"
+                  : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"
+              }`}
+            >
+              ⏱ {timed ? "Game times on" : "Add game times"}
+            </button>
+            {timed && (
+              <div className="flex flex-wrap items-center gap-4 mt-2">
+                <label className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">Start</span>
+                  <input
+                    type="time"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    className="border rounded-lg px-2 py-1 text-sm bg-white"
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">Warm-up</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={30}
+                    value={warmupMin}
+                    onChange={(e) => setWarmupMin(e.target.value)}
+                    className="border rounded-lg px-2 py-1 text-sm w-16 bg-white"
+                  />
+                  <span className="text-xs text-gray-400">min</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">Each game</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    step={0.5}
+                    value={gameMin}
+                    onChange={(e) => setGameMin(e.target.value)}
+                    className="border rounded-lg px-2 py-1 text-sm w-16 bg-white"
+                  />
+                  <span className="text-xs text-gray-400">min</span>
+                </label>
+                <span className="text-xs text-gray-500">
+                  {clock
+                    ? `${clockGames} games end at ${clock.ends[clock.ends.length - 1]} (${clockLength} in all)`
+                    : "Enter a start time and a game length."}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="text-xs font-semibold text-gray-500 mb-1">
