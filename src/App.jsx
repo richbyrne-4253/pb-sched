@@ -384,43 +384,50 @@ export default function App() {
     </>
   );
 
-  // Binary-search the biggest type that still fits one page. Reading offsetHeight
-  // forces a layout each round, so this walks a fixed 11 steps (~0.01pt) rather than
-  // looping to convergence, and it runs off the hidden probe so nothing on screen
-  // flickers through the candidate sizes.
+  // Binary-search the biggest type that still fits one page (both height and width).
+  // Reading offsetHeight/scrollWidth forces a layout each round, so this walks a fixed
+  // 11 steps (~0.01pt) rather than looping to convergence, and it runs off the hidden
+  // probe so nothing on screen flickers through the candidate sizes.
   useLayoutEffect(() => {
-    const table = probeRef.current?.querySelector("table");
+    const probe = probeRef.current;
+    const table = probe?.querySelector("table");
     if (!table) return;
+    const maxW = probe.clientWidth;
     let lo = PRINT_MIN_PT;
     let hi = PRINT_MAX_PT;
     for (let i = 0; i < 11; i++) {
       const mid = (lo + hi) / 2;
-      probeRef.current.style.setProperty("--sched-print-font", `${mid}pt`);
-      if (table.offsetHeight <= PRINT_FIT_PX) lo = mid;
+      probe.style.setProperty("--sched-print-font", `${mid}pt`);
+      if (table.offsetHeight <= PRINT_FIT_PX && table.scrollWidth <= maxW) lo = mid;
       else hi = mid;
     }
     setPrintFontPt(lo);
   }, [result, players, courts, sitPerGame, timed, startTime, warmupMin, gameMin, sessionMin, courtNames]);
 
+  const cellPad = sitPerGame > 0 ? "p-2.5 sm:p-3.5" : "p-3 sm:p-4";
   const scheduleTable = result ? (
-    <table className="sched-table w-full text-lg sm:text-2xl">
+    <table
+      className={`sched-table w-full ${
+        sitPerGame > 0 ? "text-xl sm:text-2xl lg:text-3xl" : "text-xl sm:text-3xl lg:text-4xl"
+      }`}
+    >
       <thead>
         <tr className="bg-green-700 text-white">
-          <th className="p-3 text-center w-12">Game</th>
-          {clock && <th className="p-3 text-center w-20">Start</th>}
-          {showCourtCol && <th className="p-3 text-left w-16">Court</th>}
-          <th className="p-3 text-left">Team 1</th>
-          <th className="p-3 text-center w-8">vs</th>
-          <th className="p-3 text-left">Team 2</th>
-          {sitPerGame > 0 && <th className="p-3 text-left">Sitting Out</th>}
+          <th className={`${cellPad} text-center whitespace-nowrap`}>Game</th>
+          {clock && <th className={`${cellPad} text-center whitespace-nowrap`}>Start</th>}
+          {showCourtCol && <th className={`${cellPad} text-left whitespace-nowrap`}>Court</th>}
+          <th className={`${cellPad} text-left`}>Team 1</th>
+          <th className={`${cellPad} text-center whitespace-nowrap`}>vs</th>
+          <th className={`${cellPad} text-left`}>Team 2</th>
+          {sitPerGame > 0 && <th className={`${cellPad} text-left`}>Sitting Out</th>}
         </tr>
       </thead>
       <tbody>
         {clock && Number(warmupMin) > 0 && (
           <tr className="border-b bg-amber-50">
-            <td className="p-3 text-center text-amber-700">☀</td>
-            <td className="p-3 text-center font-bold text-amber-700">{clock.sessionStart}</td>
-            <td colSpan={99} className="p-3 text-amber-800 font-medium">
+            <td className={`${cellPad} text-center text-amber-700`}>☀</td>
+            <td className={`${cellPad} text-center font-bold text-amber-700 whitespace-nowrap`}>{clock.sessionStart}</td>
+            <td colSpan={99} className={`${cellPad} text-amber-800 font-medium`}>
               Warm-up ({warmupMin} min)
             </td>
           </tr>
@@ -434,7 +441,7 @@ export default function App() {
               {ci === 0 && (
                 <td
                   rowSpan={g.courts.length}
-                  className="p-3 text-center font-bold text-green-700 align-top"
+                  className={`${cellPad} text-center font-bold text-green-700 align-top`}
                 >
                   {g.game}
                 </td>
@@ -442,26 +449,26 @@ export default function App() {
               {clock && ci === 0 && (
                 <td
                   rowSpan={g.courts.length}
-                  className="p-3 text-center font-bold text-gray-700 align-top whitespace-nowrap"
+                  className={`${cellPad} text-center font-bold text-gray-700 align-top whitespace-nowrap`}
                 >
                   <span className={clock.minutes[gi] === 0 ? "text-red-600" : ""}>{clock.starts[gi]}</span>
                   {clock.minutes[gi] < Number(gameMin) && (
-                    <div className="text-xs font-medium text-red-600">
+                    <div className="text-[0.55em] font-medium text-red-600">
                       {clock.minutes[gi] === 0 ? "court time up" : `${clock.minutes[gi]} min`}
                     </div>
                   )}
                 </td>
               )}
               {showCourtCol && (
-                <td className="p-3 text-gray-500 font-medium whitespace-nowrap">{courtLabel(ci)}</td>
+                <td className={`${cellPad} text-gray-500 font-medium whitespace-nowrap`}>{courtLabel(ci)}</td>
               )}
-              <td className="p-3">{TeamCell(ct[0])}</td>
-              <td className="p-3 text-center text-gray-400 font-bold">vs</td>
-              <td className="p-3">{TeamCell(ct[1])}</td>
+              <td className={cellPad}>{TeamCell(ct[0])}</td>
+              <td className={`${cellPad} text-center text-gray-400 font-bold`}>vs</td>
+              <td className={cellPad}>{TeamCell(ct[1])}</td>
               {sitPerGame > 0 && ci === 0 && (
                 <td
                   rowSpan={g.courts.length}
-                  className="sit-cell p-3 text-gray-500 text-sm sm:text-base align-top"
+                  className={`sit-cell ${cellPad} text-gray-500 text-base sm:text-xl lg:text-2xl align-top`}
                 >
                   {g.sitting.map((s, si) => (
                     <span key={si} className={`${playerColors[s]} font-medium`}>
@@ -479,16 +486,16 @@ export default function App() {
   ) : null;
 
   return (
-    <div className="app-shell min-h-screen bg-gradient-to-br from-green-50 to-teal-50 p-4">
-      <div className="max-w-4xl mx-auto">
+    <div className="app-shell min-h-screen bg-gradient-to-br from-green-50 to-teal-50 p-4 sm:p-6">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-6 no-print">
-          <h1 className="text-3xl font-bold text-green-800">🏓 PB1 Pickleball Scheduler</h1>
-          <p className="text-gray-500 mt-1 text-sm">{subtitle}</p>
+          <h1 className="text-4xl sm:text-5xl font-bold text-green-800">🏓 PB1 Pickleball Scheduler</h1>
+          <p className="text-gray-500 mt-2 text-base sm:text-lg">{subtitle}</p>
         </div>
 
         {prefill && (
-          <div className="no-print bg-green-50 border border-green-200 text-green-800 text-sm rounded-2xl px-4 py-2 mb-4">
+          <div className="no-print bg-green-50 border border-green-200 text-green-800 text-base sm:text-lg rounded-2xl px-5 py-3 mb-5">
             Filled in from the next booking: <span className="font-semibold">{prefill.label}</span>
             {prefill.courtNames.filter(Boolean).length > 0 &&
               ` · court ${prefill.courtNames.filter(Boolean).join(" and ")}`}
@@ -501,13 +508,13 @@ export default function App() {
         )}
 
         {/* Player Names */}
-        <div className="bg-white rounded-2xl shadow p-4 mb-4 no-print">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-bold text-gray-700">👥 Players (click a name to edit)</h2>
+        <div className="bg-white rounded-2xl shadow p-5 sm:p-6 mb-5 no-print">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-700">👥 Players (click a name to edit)</h2>
             <button
               onClick={addPlayer}
               disabled={players.length >= MAX_PLAYERS}
-              className={`text-sm font-semibold px-3 py-1 rounded-lg border ${
+              className={`text-base sm:text-lg font-semibold px-4 py-2 rounded-xl border ${
                 players.length >= MAX_PLAYERS
                   ? "text-gray-300 border-gray-200 cursor-not-allowed"
                   : "text-green-700 border-green-300 hover:bg-green-50"
@@ -516,14 +523,14 @@ export default function App() {
               ＋ Add player
             </button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {players.map((p, i) => (
-              <div key={i} className="flex flex-col gap-1">
+              <div key={i} className="flex flex-col gap-1.5">
                 <div className="flex items-stretch gap-1 relative">
                   {editingIdx === i ? (
                     <div className="relative flex-1">
                       <input
-                        className="border-2 border-green-400 rounded-lg px-3 py-2 w-full text-sm font-medium focus:outline-none"
+                        className="border-2 border-green-400 rounded-xl px-3.5 py-2.5 w-full text-lg font-medium focus:outline-none"
                         value={editVal}
                         onChange={(e) => setEditVal(e.target.value)}
                         onBlur={saveEdit}
@@ -551,7 +558,7 @@ export default function App() {
                             );
                         if (!opts.length) return null;
                         return (
-                          <ul className="absolute z-20 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto bg-white border-2 border-green-300 rounded-lg shadow-lg py-1">
+                          <ul className="absolute z-20 left-0 right-0 top-full mt-1 max-h-56 overflow-y-auto bg-white border-2 border-green-300 rounded-xl shadow-lg py-1">
                             {opts.map((n) => (
                               <li key={n}>
                                 <button
@@ -560,7 +567,7 @@ export default function App() {
                                     e.preventDefault();
                                     chooseName(i, n);
                                   }}
-                                  className="w-full text-left px-3 py-2 text-sm font-medium text-gray-700 hover:bg-green-100"
+                                  className="w-full text-left px-3.5 py-2.5 text-lg font-medium text-gray-700 hover:bg-green-100"
                                 >
                                   {n}
                                 </button>
@@ -573,7 +580,7 @@ export default function App() {
                   ) : (
                     <button
                       onClick={() => startEdit(i)}
-                      className={`flex-1 text-left px-3 py-2 rounded-lg text-sm font-semibold border-2 border-transparent hover:border-green-300 transition-colors ${playerBg[p]} ${playerColors[p]}`}
+                      className={`flex-1 text-left px-4 py-3 rounded-xl text-lg sm:text-xl font-semibold border-2 border-transparent hover:border-green-300 transition-colors ${playerBg[p]} ${playerColors[p]}`}
                     >
                       {p}
                     </button>
@@ -581,7 +588,7 @@ export default function App() {
                   <button
                     onClick={() => removePlayer(i)}
                     disabled={players.length <= MIN_PLAYERS}
-                    className={`px-2 rounded-lg text-sm ${
+                    className={`px-2.5 rounded-xl text-base ${
                       players.length <= MIN_PLAYERS
                         ? "text-gray-200 cursor-not-allowed"
                         : "text-gray-400 hover:text-red-500 hover:bg-red-50"
@@ -591,12 +598,12 @@ export default function App() {
                     ✕
                   </button>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1.5">
                   {["M", "F"].map((g) => (
                     <button
                       key={g}
                       onClick={() => setGender(p, g)}
-                      className={`flex-1 px-2 py-1 rounded text-xs font-bold border ${
+                      className={`flex-1 px-2 py-1.5 rounded-lg text-sm sm:text-base font-bold border ${
                         genders[p] === g
                           ? g === "M"
                             ? "bg-blue-600 text-white border-blue-600"
@@ -611,7 +618,7 @@ export default function App() {
               </div>
             ))}
           </div>
-          <p className="text-xs text-gray-400 mt-3">
+          <p className="text-sm sm:text-base text-gray-500 mt-4">
             {players.length} players →{" "}
             {sitPerGame === 0
               ? `${courts} court${courts > 1 ? "s" : ""}, everyone plays every game`
@@ -621,38 +628,38 @@ export default function App() {
         </div>
 
         {/* Options */}
-        <div className="bg-white rounded-2xl shadow p-4 mb-4 no-print">
-          <h2 className="font-bold text-gray-700 mb-3">⚙️ Schedule Options</h2>
+        <div className="bg-white rounded-2xl shadow p-5 sm:p-6 mb-5 no-print">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-700 mb-4">⚙️ Schedule Options</h2>
 
-          <div className="flex flex-wrap items-center gap-6 mb-4">
-            <label className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-700">Games</span>
+          <div className="flex flex-wrap items-center gap-6 mb-5">
+            <label className="flex items-center gap-2.5">
+              <span className="text-base sm:text-lg font-medium text-gray-700">Games</span>
               <input
                 type="number"
                 min={1}
                 max={30}
                 value={numGames}
                 onChange={(e) => setNumGames(parseInt(e.target.value, 10) || 0)}
-                className="border rounded-lg px-2 py-1 text-sm w-20 bg-white"
+                className="border rounded-xl px-3 py-2 text-base sm:text-lg w-24 bg-white"
               />
-              <span className="text-xs text-gray-400">≈ each plays {playsPerPlayer}</span>
+              <span className="text-sm sm:text-base text-gray-500">≈ each plays {playsPerPlayer}</span>
             </label>
 
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2.5 cursor-pointer">
               <input
                 type="checkbox"
                 checked={coed}
                 onChange={(e) => setCoed(e.target.checked)}
-                className="w-4 h-4 accent-green-700"
+                className="w-5 h-5 accent-green-700"
               />
-              <span className="text-sm font-medium text-gray-700">
+              <span className="text-base sm:text-lg font-medium text-gray-700">
                 Coed — every team is 1 M + 1 F
               </span>
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 mb-3">
-            <span className="text-sm font-medium text-gray-700 mr-1">Courts</span>
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <span className="text-base sm:text-lg font-medium text-gray-700 mr-1">Courts</span>
             {[1, 2, 3].map((c) => {
               const can = courtOptions.includes(c);
               return (
@@ -662,7 +669,7 @@ export default function App() {
                   disabled={!can}
                   onClick={() => setCourtPick(c)}
                   title={can ? "" : `Needs at least ${c * 4} players`}
-                  className={`w-9 h-9 rounded-full text-sm font-semibold border transition-colors ${
+                  className={`w-11 h-11 rounded-full text-base sm:text-lg font-semibold border transition-colors ${
                     courts === c
                       ? "bg-green-700 text-white border-green-700"
                       : can
@@ -674,11 +681,11 @@ export default function App() {
                 </button>
               );
             })}
-            <span className="text-xs text-gray-400">4 play on each court; everyone else sits and rotates in</span>
+            <span className="text-sm sm:text-base text-gray-500">4 play on each court; everyone else sits and rotates in</span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 mb-3">
-            <span className="text-sm font-medium text-gray-700">
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <span className="text-base sm:text-lg font-medium text-gray-700">
               Court name{courts > 1 ? "s" : ""}
             </span>
             {Array.from({ length: courts }, (_, ci) => (
@@ -696,17 +703,17 @@ export default function App() {
                     return next;
                   })
                 }
-                className="border rounded-lg px-2 py-1 text-sm w-20 bg-white"
+                className="border rounded-xl px-3 py-2 text-base sm:text-lg w-24 bg-white"
               />
             ))}
-            <span className="text-xs text-gray-400">e.g. 3 and 4 — shown in the Court column</span>
+            <span className="text-sm sm:text-base text-gray-500">e.g. 3 and 4 — shown in the Court column</span>
           </div>
 
-          <div className="mb-3">
+          <div className="mb-4">
             <button
               type="button"
               onClick={() => setTimed((t) => !t)}
-              className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+              className={`px-4 py-2 rounded-full text-base sm:text-lg font-medium border transition-colors ${
                 timed
                   ? "bg-green-700 text-white border-green-700"
                   : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"
@@ -715,30 +722,30 @@ export default function App() {
               ⏱ {timed ? "Game times on" : "Add game times"}
             </button>
             {timed && (
-              <div className="flex flex-wrap items-center gap-4 mt-2">
+              <div className="flex flex-wrap items-center gap-4 mt-3">
                 <label className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-700">Start</span>
+                  <span className="text-base sm:text-lg font-medium text-gray-700">Start</span>
                   <input
                     type="time"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    className="border rounded-lg px-2 py-1 text-sm bg-white"
+                    className="border rounded-xl px-3 py-2 text-base sm:text-lg bg-white"
                   />
                 </label>
                 <label className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-700">Warm-up</span>
+                  <span className="text-base sm:text-lg font-medium text-gray-700">Warm-up</span>
                   <input
                     type="number"
                     min={0}
                     max={30}
                     value={warmupMin}
                     onChange={(e) => setWarmupMin(e.target.value)}
-                    className="border rounded-lg px-2 py-1 text-sm w-16 bg-white"
+                    className="border rounded-xl px-3 py-2 text-base sm:text-lg w-20 bg-white"
                   />
-                  <span className="text-xs text-gray-400">min</span>
+                  <span className="text-sm sm:text-base text-gray-500">min</span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-700">Each game</span>
+                  <span className="text-base sm:text-lg font-medium text-gray-700">Each game</span>
                   <input
                     type="number"
                     min={1}
@@ -746,12 +753,12 @@ export default function App() {
                     step={0.5}
                     value={gameMin}
                     onChange={(e) => setGameMin(e.target.value)}
-                    className="border rounded-lg px-2 py-1 text-sm w-16 bg-white"
+                    className="border rounded-xl px-3 py-2 text-base sm:text-lg w-20 bg-white"
                   />
-                  <span className="text-xs text-gray-400">min</span>
+                  <span className="text-sm sm:text-base text-gray-500">min</span>
                 </label>
                 <label className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-700">Court time</span>
+                  <span className="text-base sm:text-lg font-medium text-gray-700">Court time</span>
                   <input
                     type="number"
                     min={10}
@@ -759,17 +766,17 @@ export default function App() {
                     step={5}
                     value={sessionMin}
                     onChange={(e) => setSessionMin(e.target.value)}
-                    className="border rounded-lg px-2 py-1 text-sm w-16 bg-white"
+                    className="border rounded-xl px-3 py-2 text-base sm:text-lg w-24 bg-white"
                   />
-                  <span className="text-xs text-gray-400">min</span>
+                  <span className="text-sm sm:text-base text-gray-500">min</span>
                 </label>
-                <span className="text-xs text-gray-500 basis-full">
+                <span className="text-sm sm:text-base text-gray-600 basis-full">
                   {clockNote}
                   {clock && clockGames !== clock.fit && clock.fit >= 1 && clock.fit <= 30 && (
                     <button
                       type="button"
                       onClick={() => setNumGames(clock.fit)}
-                      className="ml-2 underline text-green-700 font-medium"
+                      className="ml-2 underline text-green-700 font-semibold"
                     >
                       Set games to {clock.fit}
                     </button>
@@ -779,33 +786,33 @@ export default function App() {
             )}
           </div>
 
-          <div className="text-xs font-semibold text-gray-500 mb-1">
+          <div className="text-sm sm:text-base font-semibold text-gray-600 mb-1">
             Fixed couples (optional, up to {MAX_PAIRS}) — these two always play together
           </div>
-          <div className="text-xs text-gray-400 mb-2">
+          <div className="text-sm text-gray-500 mb-3">
             Leave empty to rotate partners (everyone plays with many different people — the richer
             mix). Fill in couples to keep them together (e.g. 4 couples → every couple plays every
             other couple).
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2.5">
             {pairs.map((pair, rowIdx) => (
-              <div key={rowIdx} className="flex items-center gap-2">
-                <span className="text-xs text-gray-400 w-4">{rowIdx + 1}.</span>
+              <div key={rowIdx} className="flex items-center gap-2.5">
+                <span className="text-sm sm:text-base text-gray-400 w-5">{rowIdx + 1}.</span>
                 <select
                   value={pair.a}
                   onChange={(e) => setPair(rowIdx, "a", e.target.value)}
-                  className="border rounded-lg px-2 py-1 text-sm flex-1 bg-white"
+                  className="border rounded-xl px-3 py-2 text-base sm:text-lg flex-1 bg-white"
                 >
                   <option value="">— player —</option>
                   {pairOptionsFor(rowIdx, "a").map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
-                <span className="text-gray-400">+</span>
+                <span className="text-gray-400 text-lg">+</span>
                 <select
                   value={pair.b}
                   onChange={(e) => setPair(rowIdx, "b", e.target.value)}
-                  className="border rounded-lg px-2 py-1 text-sm flex-1 bg-white"
+                  className="border rounded-xl px-3 py-2 text-base sm:text-lg flex-1 bg-white"
                 >
                   <option value="">— player —</option>
                   {pairOptionsFor(rowIdx, "b").map((p) => (
@@ -814,7 +821,7 @@ export default function App() {
                 </select>
                 <button
                   onClick={() => clearPair(rowIdx)}
-                  className="text-gray-400 hover:text-red-500 text-sm px-2"
+                  className="text-gray-400 hover:text-red-500 text-base px-2.5"
                   title="Clear row"
                 >
                   ✕
@@ -828,7 +835,7 @@ export default function App() {
         <button
           onClick={run}
           disabled={running}
-          className={`no-print w-full py-3 rounded-2xl font-bold text-lg shadow transition-all mb-6 ${
+          className={`no-print w-full py-4 rounded-2xl font-bold text-xl sm:text-2xl shadow transition-all mb-6 ${
             running
               ? "bg-gray-300 text-gray-500 cursor-not-allowed"
               : "bg-green-700 text-white hover:bg-green-600 active:scale-95"
@@ -838,20 +845,20 @@ export default function App() {
         </button>
 
         {error && !running && (
-          <div className="no-print bg-red-50 border border-red-200 rounded-2xl p-4 mb-4 text-center text-red-700 font-semibold">
+          <div className="no-print bg-red-50 border border-red-200 rounded-2xl p-5 mb-5 text-center text-red-700 text-lg font-semibold">
             {error}
           </div>
         )}
 
         {result === undefined && !running && !error && (
           <div className="no-print text-center text-gray-400 py-12">
-            <p className="text-5xl mb-3">🏓</p>
-            <p className="text-lg">Hit Generate to create your schedule!</p>
+            <p className="text-6xl mb-3">🏓</p>
+            <p className="text-xl sm:text-2xl">Hit Generate to create your schedule!</p>
           </div>
         )}
 
         {result === null && !running && (
-          <div className="no-print bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-700 font-semibold">
+          <div className="no-print bg-red-50 border border-red-200 rounded-2xl p-6 text-center text-red-700 text-lg font-semibold">
             ✗ Couldn't build a schedule with those settings. Try adjusting games, couples, or genders.
           </div>
         )}
@@ -864,27 +871,27 @@ export default function App() {
 
         {result && (
           <>
-            <div className="no-print flex justify-center mb-4 gap-2 flex-wrap">
-              <span className="bg-green-100 text-green-800 text-sm font-semibold px-4 py-1 rounded-full border border-green-300">
+            <div className="no-print flex justify-center mb-5 gap-2.5 flex-wrap">
+              <span className="bg-green-100 text-green-800 text-base sm:text-lg font-semibold px-5 py-1.5 rounded-full border border-green-300">
                 ✓ Found in {result.iterations.toLocaleString()} iteration
                 {result.iterations !== 1 ? "s" : ""}
               </span>
-              <span className="bg-blue-100 text-blue-800 text-sm font-semibold px-4 py-1 rounded-full border border-blue-300">
+              <span className="bg-blue-100 text-blue-800 text-base sm:text-lg font-semibold px-5 py-1.5 rounded-full border border-blue-300">
                 {result.coed ? "Coed" : result.segregate ? "Same-gender courts" : "Open"}
               </span>
               {result.score === 0 && (
-                <span className="bg-emerald-100 text-emerald-800 text-sm font-semibold px-4 py-1 rounded-full border border-emerald-300">
+                <span className="bg-emerald-100 text-emerald-800 text-base sm:text-lg font-semibold px-5 py-1.5 rounded-full border border-emerald-300">
                   ★ Perfect balance
                 </span>
               )}
             </div>
 
-            <div className="no-print flex flex-wrap gap-2 mb-4 items-center">
+            <div className="no-print flex flex-wrap gap-2.5 mb-5 items-center">
               {["schedule", "partnerships", "verification"].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium capitalize transition-colors ${
+                  className={`px-5 py-2.5 rounded-full text-base sm:text-lg font-medium capitalize transition-colors ${
                     activeTab === tab
                       ? "bg-green-700 text-white"
                       : "bg-white text-gray-600 hover:bg-gray-100 shadow"
@@ -895,7 +902,7 @@ export default function App() {
               ))}
               <button
                 onClick={() => window.print()}
-                className="ml-auto px-4 py-2 rounded-full text-sm font-medium bg-white text-gray-600 shadow hover:bg-gray-100"
+                className="ml-auto px-5 py-2.5 rounded-full text-base sm:text-lg font-medium bg-white text-gray-600 shadow hover:bg-gray-100"
                 title="Prints the table below on one page"
               >
                 🖨️ Print
@@ -903,14 +910,14 @@ export default function App() {
             </div>
 
             {postKey && (
-              <div className="no-print flex flex-wrap gap-2 mb-4 items-center">
-                <span className="text-sm font-medium text-gray-600">Post as Rally to</span>
+              <div className="no-print flex flex-wrap gap-2.5 mb-5 items-center">
+                <span className="text-base sm:text-lg font-medium text-gray-600">Post as Rally to</span>
                 {[["mens", "Men's"], ["coed", "Coed"]].map(([group, label]) => (
                   <button
                     key={group}
                     onClick={() => postTo(group, label)}
                     disabled={posting}
-                    className={`px-4 py-2 rounded-full text-sm font-medium shadow ${
+                    className={`px-5 py-2.5 rounded-full text-base sm:text-lg font-medium shadow ${
                       posting ? "bg-gray-100 text-gray-400" : "bg-green-700 text-white hover:bg-green-800"
                     }`}
                   >
@@ -918,7 +925,7 @@ export default function App() {
                   </button>
                 ))}
                 {postMsg && (
-                  <span className={`text-sm ${postMsg.ok ? "text-green-700" : "text-red-600 font-semibold"}`}>
+                  <span className={`text-base sm:text-lg ${postMsg.ok ? "text-green-700" : "text-red-600 font-semibold"}`}>
                     {postMsg.text}
                   </span>
                 )}
@@ -943,17 +950,17 @@ export default function App() {
 
               {activeTab === "partnerships" && (
                 <div className="bg-white rounded-2xl shadow overflow-hidden">
-                  <div className="p-3 bg-green-50 border-b text-xs text-gray-500 flex gap-4 flex-wrap">
+                  <div className="p-4 bg-green-50 border-b text-sm sm:text-base text-gray-600 flex gap-4 flex-wrap">
                     <span>
-                      <span className="inline-block w-4 h-4 rounded bg-green-200 mr-1 align-middle"></span>
+                      <span className="inline-block w-4 h-4 rounded bg-green-200 mr-1.5 align-middle"></span>
                       Once
                     </span>
                     <span>
-                      <span className="inline-block w-4 h-4 rounded bg-yellow-200 mr-1 align-middle"></span>
+                      <span className="inline-block w-4 h-4 rounded bg-yellow-200 mr-1.5 align-middle"></span>
                       Repeat partner
                     </span>
                     <span>
-                      <span className="inline-block w-4 h-4 rounded bg-gray-100 mr-1 align-middle"></span>
+                      <span className="inline-block w-4 h-4 rounded bg-gray-100 mr-1.5 align-middle"></span>
                       Never partnered
                     </span>
                     {result.partnerCap != null && (
@@ -965,23 +972,23 @@ export default function App() {
                     )}
                   </div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-base sm:text-lg">
                       <thead>
                         <tr className="bg-green-700 text-white">
-                          <th className="p-3 text-left">Player</th>
+                          <th className="p-3.5 text-left">Player</th>
                           {players.map((p) => (
-                            <th key={p} className="p-3 text-center font-semibold">{p}</th>
+                            <th key={p} className="p-3.5 text-center font-semibold">{p}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {players.map((p1, i) => (
                           <tr key={p1} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
-                            <td className={`p-3 font-bold ${playerColors[p1]}`}>{p1}</td>
+                            <td className={`p-3.5 font-bold ${playerColors[p1]}`}>{p1}</td>
                             {players.map((p2) => {
                               if (p1 === p2)
                                 return (
-                                  <td key={p2} className="p-3 text-center text-gray-300">—</td>
+                                  <td key={p2} className="p-3.5 text-center text-gray-300">—</td>
                                 );
                               const count = result.partner[p1][p2] || 0;
                               const over = result.partnerCap != null && count > result.partnerCap;
@@ -993,9 +1000,9 @@ export default function App() {
                                 ? "bg-green-200 text-green-800"
                                 : "text-gray-300";
                               return (
-                                <td key={p2} className="p-3 text-center">
+                                <td key={p2} className="p-3.5 text-center">
                                   <span
-                                    className={`inline-block w-7 h-7 rounded-full leading-7 text-sm font-semibold ${bg}`}
+                                    className={`inline-block w-9 h-9 rounded-full leading-9 text-base font-semibold ${bg}`}
                                   >
                                     {count || "0"}
                                   </span>
@@ -1011,24 +1018,24 @@ export default function App() {
               )}
 
               {activeTab === "verification" && (
-                <div className="grid gap-3">
+                <div className="grid gap-4">
                   {courts > 1 &&
                     (() => {
                       const cc = courtCounts(result.schedule, players);
                       return (
-                        <div className="bg-white rounded-2xl shadow p-4">
-                          <h3 className="font-bold text-gray-700 mb-1">🏟️ Games on each court</h3>
-                          <p className="text-xs text-gray-400 mb-3">
+                        <div className="bg-white rounded-2xl shadow p-5 sm:p-6">
+                          <h3 className="text-lg sm:text-xl font-bold text-gray-700 mb-1">🏟️ Games on each court</h3>
+                          <p className="text-sm sm:text-base text-gray-500 mb-3">
                             Matches are placed so everyone gets as near an equal share of each court as the
                             game count allows.
                           </p>
                           <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
+                            <table className="w-full text-base sm:text-lg">
                               <thead>
                                 <tr className="bg-green-700 text-white">
-                                  <th className="p-2 text-left">Player</th>
+                                  <th className="p-3 text-left">Player</th>
                                   {Array.from({ length: courts }, (_, ci) => (
-                                    <th key={ci} className="p-2 text-center">
+                                    <th key={ci} className="p-3 text-center">
                                       Court {courtLabel(ci)}
                                     </th>
                                   ))}
@@ -1037,9 +1044,9 @@ export default function App() {
                               <tbody>
                                 {players.map((p, i) => (
                                   <tr key={p} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
-                                    <td className={`p-2 font-bold ${playerColors[p]}`}>{p}</td>
+                                    <td className={`p-3 font-bold ${playerColors[p]}`}>{p}</td>
                                     {cc[p].map((n, ci) => (
-                                      <td key={ci} className="p-2 text-center">
+                                      <td key={ci} className="p-3 text-center">
                                         {n}
                                       </td>
                                     ))}
@@ -1067,11 +1074,11 @@ export default function App() {
                         .map(([times, pairs]) => `${pairs}×${times === "0" ? "never" : `${times}x`}`)
                         .join(", ");
                     return (
-                      <div className="bg-white rounded-2xl shadow p-4">
-                        <h3 className="font-bold text-gray-700 mb-1">
+                      <div className="bg-white rounded-2xl shadow p-5 sm:p-6">
+                        <h3 className="text-lg sm:text-xl font-bold text-gray-700 mb-1">
                           📊 Fairness{stages.length > 1 ? " at each stopping point" : ""}
                         </h3>
-                        <p className="text-xs text-gray-400 mb-3">
+                        <p className="text-sm sm:text-base text-gray-500 mb-3">
                           {stages.length > 1
                             ? `Built as an optimal ${block} then ${
                                 result.schedule.length - block
@@ -1079,22 +1086,22 @@ export default function App() {
                             : "How evenly partners and opponents are spread."}
                         </p>
                         <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
+                          <table className="w-full text-base sm:text-lg">
                             <thead>
                               <tr className="bg-green-700 text-white">
-                                <th className="p-2 text-left">After</th>
-                                <th className="p-2 text-left">Partners</th>
-                                <th className="p-2 text-left">Opponents</th>
-                                <th className="p-2 text-left">Plays</th>
-                                {sitPerGame > 0 && <th className="p-2 text-left">Sits</th>}
-                                <th className="p-2 text-center">Best possible</th>
+                                <th className="p-3 text-left">After</th>
+                                <th className="p-3 text-left">Partners</th>
+                                <th className="p-3 text-left">Opponents</th>
+                                <th className="p-3 text-left">Plays</th>
+                                {sitPerGame > 0 && <th className="p-3 text-left">Sits</th>}
+                                <th className="p-3 text-center">Best possible</th>
                               </tr>
                             </thead>
                             <tbody>
                               {rows.map((a, i) => (
                                 <tr key={a.games} className={i % 2 === 0 ? "bg-white" : "bg-green-50"}>
-                                  <td className="p-2 font-bold text-green-700">{a.games} games</td>
-                                  <td className="p-2">
+                                  <td className="p-3 font-bold text-green-700">{a.games} games</td>
+                                  <td className="p-3">
                                     {fmt(a.partners)}
                                     {a.neverPartnered > 0 && (
                                       <span className="text-red-600 font-semibold">
@@ -1104,20 +1111,20 @@ export default function App() {
                                       </span>
                                     )}
                                   </td>
-                                  <td className="p-2 text-gray-600">{fmt(a.opponents)}</td>
-                                  <td className="p-2 text-gray-600">
+                                  <td className="p-3 text-gray-600">{fmt(a.opponents)}</td>
+                                  <td className="p-3 text-gray-600">
                                     {a.playSpread[0] === a.playSpread[1]
                                       ? `${a.playSpread[0]} each`
                                       : `${a.playSpread[0]}–${a.playSpread[1]}`}
                                   </td>
                                   {sitPerGame > 0 && (
-                                    <td className="p-2 text-gray-600">
+                                    <td className="p-3 text-gray-600">
                                       {a.sitSpread[0] === a.sitSpread[1]
                                         ? `${a.sitSpread[0]} each`
                                         : `${a.sitSpread[0]}–${a.sitSpread[1]}`}
                                     </td>
                                   )}
-                                  <td className="p-2 text-center">
+                                  <td className="p-3 text-center">
                                     {a.partnersOptimal ? (
                                       <span className="text-green-700 font-semibold">★ optimal</span>
                                     ) : (
@@ -1135,22 +1142,22 @@ export default function App() {
                     );
                   })()}
 
-                  <div className="bg-white rounded-2xl shadow p-4">
-                    <h3 className="font-bold text-gray-700 mb-3">🎮 Games played</h3>
-                    <div className="grid gap-2">
+                  <div className="bg-white rounded-2xl shadow p-5 sm:p-6">
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-700 mb-3">🎮 Games played</h3>
+                    <div className="grid gap-2.5">
                       {players.map((p) => {
                         const games = buildPlayerGames(result.schedule)[p] || [];
                         const allGames = Array.from({ length: numGames }, (_, k) => k + 1);
                         const sits = allGames.filter((g) => !games.includes(g));
                         return (
-                          <div key={p} className="flex items-center gap-2 text-sm flex-wrap">
-                            <span className={`font-bold w-16 ${playerColors[p]}`}>{p}</span>
+                          <div key={p} className="flex items-center gap-2.5 text-base sm:text-lg flex-wrap">
+                            <span className={`font-bold w-24 ${playerColors[p]}`}>{p}</span>
                             <span className="text-green-600 font-semibold">{games.length}×</span>
-                            <div className="flex gap-1 flex-wrap">
+                            <div className="flex gap-1.5 flex-wrap">
                               {allGames.map((g) => (
                                 <span
                                   key={g}
-                                  className={`w-6 h-6 rounded text-xs flex items-center justify-center font-semibold ${
+                                  className={`w-8 h-8 rounded text-sm flex items-center justify-center font-semibold ${
                                     games.includes(g)
                                       ? `${playerBg[p]} ${playerColors[p]}`
                                       : "bg-gray-100 text-gray-300"
@@ -1161,7 +1168,7 @@ export default function App() {
                               ))}
                             </div>
                             {sitPerGame > 0 && (
-                              <span className="text-gray-400 text-xs">
+                              <span className="text-gray-500 text-sm sm:text-base">
                                 sits: {sits.length ? sits.join(", ") : "none"}
                               </span>
                             )}
